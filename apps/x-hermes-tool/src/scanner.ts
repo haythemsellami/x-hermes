@@ -1,4 +1,5 @@
 import { openXHermesDatabase, type XHermesDatabase } from "./db.js";
+import { scoreCandidate } from "./scoring.js";
 import { runXurl } from "./xurl.js";
 import type { AuthorRecord, CandidateRecord, StoredCandidateRecord } from "./types.js";
 
@@ -107,6 +108,12 @@ export async function scanRecentPosts(options: ScanOptions): Promise<ScanSummary
         let newCandidates = 0;
 
         for (const item of parsed.candidates) {
+          const scoring = scoreCandidate(item.candidate, item.author, {
+            optedOut: db.isOptedOut(item.author.username)
+          });
+          item.candidate.score = scoring.score;
+          item.candidate.riskFlags = scoring.riskFlags;
+          item.candidate.status = scoring.accepted ? "found" : "skipped";
           db.upsertAuthor(item.author);
           if (!db.getCandidate(item.candidate.tweetId)) {
             newCandidates += 1;
@@ -317,4 +324,3 @@ function asNumber(value: unknown): number | undefined {
 function asBoolean(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
 }
-

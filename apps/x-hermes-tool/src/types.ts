@@ -135,6 +135,20 @@ export interface AuditEventRecord {
   createdAt: string;
 }
 
+export interface CandidateScore {
+  score: number;
+  riskFlags: string[];
+  accepted: boolean;
+}
+
+export interface XHermesStats {
+  candidatesByStatus: Record<CandidateStatus, number>;
+  replyDrafts: number;
+  postedReplies: number;
+  optOuts: number;
+  auditEvents: number;
+}
+
 export const DEFAULT_CONFIG: XHermesConfig = {
   xurlApp: "x-hermes",
   username: "",

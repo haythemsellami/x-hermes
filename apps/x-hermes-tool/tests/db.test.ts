@@ -99,7 +99,7 @@ describe("database", () => {
         text: "Thanks for asking.",
         draftedBy: "test"
       });
-      expect(draft.status).toBe("drafted");
+      expect(draft.status).toBe("approval_pending");
       expect(db.getLatestDraftForCandidate("tweet-1")?.id).toBe(draft.id);
       expect(db.getCandidate("tweet-1")?.status).toBe("approval_pending");
 
@@ -174,4 +174,3 @@ async function tempDir(): Promise<string> {
   tempDirs.push(dir);
   return dir;
 }
-

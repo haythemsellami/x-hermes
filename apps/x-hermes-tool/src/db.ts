@@ -11,7 +11,8 @@ import type {
   CandidateStatus,
   ReplyDraftRecord,
   StoredCandidateRecord,
-  WatchQueryRecord
+  WatchQueryRecord,
+  XHermesStats
 } from "./types.js";
 
 const CURRENT_SCHEMA_VERSION = 1;
@@ -67,6 +68,18 @@ interface WatchQueryRow {
   last_cursor: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface AuthorRow {
+  author_id: string;
+  username: string;
+  display_name: string | null;
+  verified: number | null;
+  created_at_x: string | null;
+  followers_count: number | null;
+  following_count: number | null;
+  listed_count: number | null;
+  raw_json: string | null;
 }
 
 interface ReplyDraftRow {
@@ -288,6 +301,13 @@ export class XHermesDatabase {
       );
   }
 
+  getAuthor(authorId: string): AuthorRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM authors WHERE author_id = ?").get(authorId) as
+      | AuthorRow
+      | undefined;
+    return row ? mapAuthorRow(row) : undefined;
+  }
+
   upsertCandidate(candidate: CandidateRecord): StoredCandidateRecord {
     this.db
       .prepare(
@@ -378,13 +398,14 @@ export class XHermesDatabase {
   }): ReplyDraftRecord {
     const id = randomUUID();
     const timestamp = nowIso();
+    const status = input.status ?? "approval_pending";
     this.db
       .prepare(
         `INSERT INTO reply_drafts (id, tweet_id, text, drafted_by, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(id, input.tweetId, input.text, input.draftedBy, input.status ?? "drafted", timestamp, timestamp);
-    if (input.status === "approval_pending" || input.status === undefined) {
+      .run(id, input.tweetId, input.text, input.draftedBy, status, timestamp, timestamp);
+    if (status === "approval_pending") {
       this.updateCandidateStatus(input.tweetId, "approval_pending");
     }
     const saved = this.getReplyDraft(id);
@@ -539,6 +560,29 @@ export class XHermesDatabase {
       .get(counterKey, windowStart) as { count: number };
     return row.count;
   }
+
+  getStats(): XHermesStats {
+    const statusCounts = this.db
+      .prepare("SELECT status, COUNT(*) AS count FROM candidates GROUP BY status")
+      .all() as unknown as Array<{ status: CandidateStatus; count: number }>;
+    const candidatesByStatus = emptyCandidateStatusCounts();
+    for (const row of statusCounts) {
+      candidatesByStatus[row.status] = row.count;
+    }
+
+    return {
+      candidatesByStatus,
+      replyDrafts: this.countTable("reply_drafts"),
+      postedReplies: this.countTable("posted_replies"),
+      optOuts: this.countTable("opt_outs"),
+      auditEvents: this.countTable("audit_events")
+    };
+  }
+
+  private countTable(table: "reply_drafts" | "posted_replies" | "opt_outs" | "audit_events"): number {
+    const row = this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
+    return row.count;
+  }
 }
 
 const SCHEMA_SQL = `
@@ -680,6 +724,20 @@ function mapCandidateRow(row: CandidateRow): StoredCandidateRecord {
   };
 }
 
+function mapAuthorRow(row: AuthorRow): AuthorRecord {
+  return {
+    authorId: row.author_id,
+    username: row.username,
+    displayName: row.display_name ?? undefined,
+    verified: row.verified === null ? undefined : row.verified === 1,
+    createdAtX: row.created_at_x ?? undefined,
+    followersCount: row.followers_count ?? undefined,
+    followingCount: row.following_count ?? undefined,
+    listedCount: row.listed_count ?? undefined,
+    raw: parseJson(row.raw_json, undefined)
+  };
+}
+
 function mapWatchQueryRow(row: WatchQueryRow): WatchQueryRecord {
   return {
     id: row.id,
@@ -751,4 +809,17 @@ function clampLimit(value: number, min: number, max: number): number {
     return min;
   }
   return Math.max(min, Math.min(max, Math.trunc(value)));
+}
+
+function emptyCandidateStatusCounts(): Record<CandidateStatus, number> {
+  return {
+    found: 0,
+    rejected: 0,
+    drafted: 0,
+    approval_pending: 0,
+    approved: 0,
+    posted: 0,
+    failed: 0,
+    skipped: 0
+  };
 }
