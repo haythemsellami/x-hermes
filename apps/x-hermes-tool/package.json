@@ -1,0 +1,23 @@
+{
+  "name": "x-hermes",
+  "version": "0.1.0",
+  "description": "CLI and MCP server for safe Hermes operation of an X account through xurl.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "x-hermes": "dist/cli.js",
+    "x-hermes-mcp": "dist/mcp.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
+

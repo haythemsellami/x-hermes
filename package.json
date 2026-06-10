@@ -1,0 +1,22 @@
+{
+  "name": "x-hermes-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Safe Hermes integration for operating an X account through the official X API.",
+  "license": "MIT",
+  "packageManager": "pnpm@10.12.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "pnpm --filter x-hermes build",
+    "test": "pnpm --filter x-hermes test",
+    "typecheck": "pnpm --filter x-hermes typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
+
