@@ -150,7 +150,7 @@ if (args.slice(0, 2).join(" ") === "auth default") {
   console.log("default set");
   process.exit(0);
 }
-if (args[0] === "search") {
+if (args[0]?.startsWith("/2/tweets/search/recent")) {
   console.log("[]");
   process.exit(0);
 }
@@ -180,4 +180,3 @@ process.exit(2);
     env
   };
 }
-

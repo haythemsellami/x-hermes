@@ -1,6 +1,7 @@
 import { loadConfig } from "./config.js";
 import { openXHermesDatabase, type XHermesDatabase } from "./db.js";
 import { evaluatePostingGuardrails } from "./guardrails.js";
+import { buildReplyBody } from "./xapi.js";
 import { runXurl } from "./xurl.js";
 import type { GuardrailResult } from "./types.js";
 
@@ -69,10 +70,13 @@ export async function postApprovedReply(
       throw new Error("Invariant violation: guardrails allowed posting without a draft.");
     }
 
-    const reply = await runXurl(["reply", options.tweetId, draft.text], {
-      timeoutMs: 30_000,
-      env
-    });
+    const reply = await runXurl(
+      ["-X", "POST", "/2/tweets", "-d", buildReplyBody(options.tweetId, draft.text)],
+      {
+        timeoutMs: 30_000,
+        env
+      }
+    );
     if (!reply.ok) {
       const output = (reply.stderr || reply.stdout || "xurl reply failed").trim();
       db.updateCandidateStatus(options.tweetId, "failed");
@@ -142,4 +146,3 @@ function parseJsonMaybe(value: string): unknown {
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
-

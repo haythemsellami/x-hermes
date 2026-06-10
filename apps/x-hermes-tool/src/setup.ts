@@ -8,6 +8,7 @@ import {
 } from "./config.js";
 import { promptConfirm, promptSecret, promptText, isInteractive, type PromptIo } from "./prompt.js";
 import { runProcessInherited } from "./process.js";
+import { buildRecentSearchPath } from "./xapi.js";
 import { runXurl, runXurlInherited } from "./xurl.js";
 import type {
   DiagnosticCheck,
@@ -493,7 +494,7 @@ async function maybeRunSearchSmokeCheck(
 
   const handle = username.replace(/^@/, "");
   const query = `from:${handle} -is:retweet`;
-  const result = await runXurl(["search", query, "-n", "3"], { timeoutMs: 20_000, env });
+  const result = await runXurl([buildRecentSearchPath(query, 10)], { timeoutMs: 20_000, env });
   if (!result.ok) {
     io.output.write("Search smoke test failed. This may be due to X API plan access.\n");
   }

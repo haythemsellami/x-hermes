@@ -167,7 +167,7 @@ async function createFixture(searchOutput: unknown): Promise<{
     fakeXurlPath,
     `#!/usr/bin/env node
 const args = process.argv.slice(2);
-if (args[0] === "search") {
+if (args[0]?.startsWith("/2/tweets/search/recent")) {
   console.log(process.env.FAKE_XURL_SEARCH_OUTPUT);
   process.exit(0);
 }
@@ -192,4 +192,3 @@ process.exit(2);
     }
   };
 }
-

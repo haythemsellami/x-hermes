@@ -78,9 +78,9 @@ describe("posting", () => {
       expect(db.getCandidate("tweet-1")?.status).toBe("posted");
       expect(db.getLatestDraftForCandidate("tweet-1")?.status).toBe("posted");
       expect(db.countPostedRepliesSince("1970-01-01T00:00:00.000Z")).toBe(1);
-      await expect(readFile(fixture.xurlLogPath, "utf8")).resolves.toContain(
-        "reply tweet-1 A helpful reply."
-      );
+      const log = await readFile(fixture.xurlLogPath, "utf8");
+      expect(log).toContain("-X POST /2/tweets -d");
+      expect(log).toContain("in_reply_to_tweet_id");
     } finally {
       db.close();
     }
@@ -130,7 +130,7 @@ if (args.join(" ") === "auth status") {
   console.log("authenticated");
   process.exit(0);
 }
-if (args[0] === "reply") {
+if (args[0] === "-X" && args[1] === "POST" && args[2] === "/2/tweets") {
   console.log(JSON.stringify({ data: { id: "reply-1" } }));
   process.exit(0);
 }
@@ -157,4 +157,3 @@ process.exit(2);
     }
   };
 }
-

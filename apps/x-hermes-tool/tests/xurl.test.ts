@@ -17,6 +17,15 @@ describe("xurl wrapper", () => {
     expect(() => assertAllowedXurlArgs(["read", "123"])).not.toThrow();
     expect(() => assertAllowedXurlArgs(["reply", "123", "text"])).not.toThrow();
     expect(() => assertAllowedXurlArgs(["/2/tweets/search/recent?query=hello"])).not.toThrow();
+    expect(() =>
+      assertAllowedXurlArgs([
+        "-X",
+        "POST",
+        "/2/tweets",
+        "-d",
+        "{\"text\":\"hello\",\"reply\":{\"in_reply_to_tweet_id\":\"123\"}}"
+      ])
+    ).not.toThrow();
     expect(() => assertAllowedXurlArgs(["auth", "apps", "delete", "x-hermes"])).toThrow(
       /Refusing/
     );
@@ -47,4 +56,3 @@ describe("xurl wrapper", () => {
     ]);
   });
 });
-

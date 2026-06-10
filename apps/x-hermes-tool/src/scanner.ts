@@ -1,5 +1,6 @@
 import { openXHermesDatabase, type XHermesDatabase } from "./db.js";
 import { scoreCandidate } from "./scoring.js";
+import { buildRecentSearchPath } from "./xapi.js";
 import { runXurl } from "./xurl.js";
 import type { AuthorRecord, CandidateRecord, StoredCandidateRecord } from "./types.js";
 
@@ -79,7 +80,7 @@ export async function scanRecentPosts(options: ScanOptions): Promise<ScanSummary
       });
 
       try {
-        const xurlResult = await runXurl(["search", target.query, "-n", String(options.limit)], {
+        const xurlResult = await runXurl([buildRecentSearchPath(target.query, options.limit)], {
           timeoutMs: 30_000,
           env: options.env
         });

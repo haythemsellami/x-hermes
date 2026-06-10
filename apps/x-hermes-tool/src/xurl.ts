@@ -56,6 +56,10 @@ export function assertAllowedXurlArgs(args: string[]): void {
     return;
   }
 
+  if (first === "-X" && second === "POST" && third === "/2/tweets" && args.includes("-d")) {
+    return;
+  }
+
   throw new Error(`Refusing to run unsupported xurl operation: ${redactArgv(args).join(" ")}`);
 }
 
