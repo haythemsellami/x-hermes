@@ -4,12 +4,17 @@
   "private": true,
   "description": "Safe Hermes integration for operating an X account through the official X API.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/haythemsellami/x-hermes.git"
+  },
   "packageManager": "pnpm@10.12.1",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
     "build": "pnpm --filter x-hermes build",
+    "ci": "pnpm typecheck && pnpm test && pnpm build",
     "test": "pnpm --filter x-hermes test",
     "typecheck": "pnpm --filter x-hermes typecheck"
   },
@@ -19,4 +24,3 @@
     "vitest": "^3.2.4"
   }
 }
-

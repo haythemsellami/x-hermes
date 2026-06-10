@@ -39,8 +39,11 @@ Official X API
 - **Non-secret config**: tool config is stored in `~/.config/x-hermes/config.json`; X tokens remain under `~/.xurl`, managed by `xurl`.
 - **Diagnostics**: `doctor` and `status` report readiness without reading or printing credential files.
 - **Hermes integration**: MCP server support gives Hermes a structured interface instead of generic shell access.
+- **Search ingestion**: watch queries and direct scans store candidates and authors locally.
+- **Deterministic scoring**: candidate scoring runs before Hermes judgment and records risk flags.
+- **Approval queue**: drafts, approvals, rejections, opt-outs, and audit events are stored locally.
 - **Guardrail-first design**: posting is intended to fail closed when approval, rate limit, active-hour, opt-out, cooldown, or risk checks do not pass.
-- **Local durable state**: SQLite is the intended storage layer for candidates, queues, audit events, opt-outs, and rate-limit counters.
+- **Local durable state**: SQLite stores candidates, queues, audit events, opt-outs, and rate-limit counters.
 
 ## Requirements
 
@@ -94,6 +97,7 @@ When packaged or linked, the intended commands are:
 x-hermes doctor
 x-hermes status
 x-hermes setup
+x-hermes scan --query "your topic lang:en -is:retweet"
 x-hermes-mcp
 ```
 
@@ -175,11 +179,25 @@ x-hermes setup --check-only
 x-hermes setup --with-hermes
 x-hermes status
 x-hermes doctor
+x-hermes watch-queries add "Name" --query "keyword lang:en -is:retweet"
+x-hermes watch-queries list
+x-hermes scan --query "keyword lang:en -is:retweet" --limit 25
+x-hermes scan --limit 25
+x-hermes candidates list
+x-hermes candidates show <tweet-id>
+x-hermes draft <tweet-id> --text "Your reply text" --by <actor>
+x-hermes approve <tweet-id> --by <actor> --reason "Reviewed"
+x-hermes reject <tweet-id> --by <actor> --reason "Low relevance"
+x-hermes post-approved <tweet-id> --by <actor>
+x-hermes opt-out add @username --by <actor> --reason "Requested"
+x-hermes stats
 x-hermes mcp
 x-hermes-mcp
 ```
 
 `doctor` never mutates state. `setup --check-only` runs setup checks without installs, auth changes, or config writes.
+
+Posting is disabled by default. To post, a candidate must have an approved draft and pass every guardrail, including `postingEnabled`, active hours, daily cap, author cooldown, opt-out state, duplicate text checks, unresolved risk flags, and opt-in evidence when required.
 
 ## MCP
 
@@ -203,6 +221,21 @@ Example MCP server configuration:
 ```
 
 The MCP interface is intentionally structured. It should expose approved `x-hermes` workflows, not generic shell access or arbitrary `xurl` execution.
+
+Available MCP tools:
+
+```text
+status
+scan_recent_posts
+list_candidates
+get_candidate
+queue_reply_draft
+approve_candidate
+reject_candidate
+post_approved_reply
+record_opt_out
+get_stats
+```
 
 ## Security Model
 
@@ -252,6 +285,8 @@ x-hermes/
 ```
 
 The product spec lives in [`docs/spec.md`](docs/spec.md). Treat it as the source of truth for behavior and safety constraints.
+
+See [`docs/usage.md`](docs/usage.md) for a complete local workflow.
 
 ## Contributing
 

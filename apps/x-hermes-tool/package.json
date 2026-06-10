@@ -4,6 +4,22 @@
   "description": "CLI and MCP server for safe Hermes operation of an X account through xurl.",
   "license": "MIT",
   "type": "module",
+  "main": "dist/cli.js",
+  "types": "dist/cli.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/haythemsellami/x-hermes.git",
+    "directory": "apps/x-hermes-tool"
+  },
+  "keywords": [
+    "hermes",
+    "mcp",
+    "x",
+    "twitter",
+    "x-api",
+    "automation",
+    "xurl"
+  ],
   "bin": {
     "x-hermes": "dist/cli.js",
     "x-hermes-mcp": "dist/mcp.js"
@@ -13,11 +29,10 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "test": "NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
   },
   "engines": {
     "node": ">=24"
   }
 }
-
