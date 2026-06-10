@@ -481,6 +481,17 @@ export class XHermesDatabase {
     return row;
   }
 
+  countDuplicateReplyTextSince(replyText: string, sinceIso: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM posted_replies
+         WHERE lower(reply_text) = lower(?) AND posted_at >= ?`
+      )
+      .get(replyText, sinceIso) as { count: number };
+    return row.count;
+  }
+
   addOptOut(input: { username: string; authorId?: string; reason?: string }): void {
     this.db
       .prepare(

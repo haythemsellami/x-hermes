@@ -98,6 +98,9 @@ async function main(argv: string[]): Promise<number> {
     case "opt-out":
       return await runOptOutCommand(parsed);
 
+    case "post-approved":
+      return await runPostApprovedCommand(parsed);
+
     case "stats":
       return await runStatsCommand(parsed);
 
@@ -157,6 +160,7 @@ Usage:
   x-hermes draft <tweet-id> --text <reply> [--by <actor>]
   x-hermes approve <tweet-id> --by <actor> [--reason <reason>]
   x-hermes reject <tweet-id> [--by <actor>] [--reason <reason>]
+  x-hermes post-approved <tweet-id> [--by <actor>] [--json]
   x-hermes opt-out add <username> [--by <actor>] [--reason <reason>]
   x-hermes stats [--json]
   x-hermes mcp
@@ -345,6 +349,35 @@ async function runOptOutCommand(parsed: ParsedArgs): Promise<number> {
     reason: getStringFlag(parsed, "--reason")
   });
   process.stdout.write(`Recorded opt-out for ${username}\n`);
+  return 0;
+}
+
+async function runPostApprovedCommand(parsed: ParsedArgs): Promise<number> {
+  const tweetId = parsed.subcommand;
+  if (!tweetId) {
+    process.stderr.write("Usage: x-hermes post-approved <tweet-id> [--by <actor>] [--json]\n");
+    return 2;
+  }
+  const { postApprovedReply } = await import("./posting.js");
+  const result = await postApprovedReply({
+    tweetId,
+    actor: getStringFlag(parsed, "--by") ?? "cli"
+  });
+
+  if (hasFlag(parsed, "--json")) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return result.posted ? 0 : 1;
+  }
+
+  if (!result.posted) {
+    process.stderr.write(`Posting blocked for ${tweetId}:\n`);
+    for (const failure of result.guardrails.failures) {
+      process.stderr.write(`  ${failure.id}: ${failure.message}\n`);
+    }
+    return 1;
+  }
+
+  process.stdout.write(`Posted reply ${result.replyTweetId} for ${tweetId}\n`);
   return 0;
 }
 

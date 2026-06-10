@@ -149,6 +149,16 @@ export interface XHermesStats {
   auditEvents: number;
 }
 
+export interface GuardrailFailure {
+  id: string;
+  message: string;
+}
+
+export interface GuardrailResult {
+  allowed: boolean;
+  failures: GuardrailFailure[];
+}
+
 export const DEFAULT_CONFIG: XHermesConfig = {
   xurlApp: "x-hermes",
   username: "",
