@@ -61,6 +61,80 @@ export interface StatusOptions {
   withHermes: boolean;
 }
 
+export type CandidateStatus =
+  | "found"
+  | "rejected"
+  | "drafted"
+  | "approval_pending"
+  | "approved"
+  | "posted"
+  | "failed"
+  | "skipped";
+
+export interface AuthorRecord {
+  authorId: string;
+  username: string;
+  displayName?: string;
+  verified?: boolean;
+  createdAtX?: string;
+  followersCount?: number;
+  followingCount?: number;
+  listedCount?: number;
+  raw?: unknown;
+}
+
+export interface CandidateRecord {
+  tweetId: string;
+  authorId: string;
+  authorUsername: string;
+  text: string;
+  url?: string;
+  createdAtX?: string;
+  status: CandidateStatus;
+  score: number;
+  riskFlags: string[];
+  publicMetrics?: Record<string, unknown>;
+  referencedTweets?: unknown[];
+  sensitive: boolean;
+  sourceQuery?: string;
+  raw?: unknown;
+}
+
+export interface StoredCandidateRecord extends CandidateRecord {
+  foundAt: string;
+  updatedAt: string;
+}
+
+export interface WatchQueryRecord {
+  id: string;
+  name: string;
+  query: string;
+  enabled: boolean;
+  lastCursor?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReplyDraftRecord {
+  id: string;
+  tweetId: string;
+  text: string;
+  draftedBy: string;
+  status: "drafted" | "approval_pending" | "approved" | "rejected" | "posted";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AuditEventRecord {
+  id: string;
+  eventType: string;
+  actor: string;
+  entityType: string;
+  entityId: string;
+  details?: unknown;
+  createdAt: string;
+}
+
 export const DEFAULT_CONFIG: XHermesConfig = {
   xurlApp: "x-hermes",
   username: "",
@@ -76,4 +150,3 @@ export const DEFAULT_CONFIG: XHermesConfig = {
   requireApprovalForKeywordSearch: true,
   requireOptInForAutoPost: true
 };
-
