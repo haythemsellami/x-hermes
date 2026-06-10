@@ -22,10 +22,13 @@ const INSTALL_XURL_COMMAND =
   "curl -fsSL https://raw.githubusercontent.com/xdevplatform/xurl/main/install.sh | bash";
 
 export async function collectStatus(
-  options: StatusOptions & { mutateStorage?: boolean } = { withHermes: false }
+  options: StatusOptions & { mutateStorage?: boolean; env?: NodeJS.ProcessEnv } = {
+    withHermes: false
+  }
 ): Promise<StatusReport> {
-  const loaded = await loadConfig();
-  const dataDir = getDataDir();
+  const env = options.env ?? process.env;
+  const loaded = await loadConfig(env);
+  const dataDir = getDataDir(env);
   const checks: DiagnosticCheck[] = [];
 
   checks.push(checkPlatform());
@@ -33,14 +36,14 @@ export async function collectStatus(
   checks.push(checkConfig(loaded));
   checks.push(await checkStorage(dataDir, Boolean(options.mutateStorage)));
 
-  const xurlHelp = await runXurl(["--help"], { timeoutMs: 10_000 });
+  const xurlHelp = await runXurl(["--help"], { timeoutMs: 10_000, env });
   checks.push(checkXurlHelp(xurlHelp.ok));
 
   if (xurlHelp.ok) {
-    const authStatus = await runXurl(["auth", "status"], { timeoutMs: 15_000 });
+    const authStatus = await runXurl(["auth", "status"], { timeoutMs: 15_000, env });
     checks.push(checkXurlAuth(authStatus.ok, authStatus.stderr || authStatus.stdout));
 
-    const whoami = await runXurl(["whoami"], { timeoutMs: 15_000 });
+    const whoami = await runXurl(["whoami"], { timeoutMs: 15_000, env });
     checks.push(checkXurlWhoami(whoami.ok, whoami.stdout || whoami.stderr));
   } else {
     checks.push({
@@ -53,7 +56,7 @@ export async function collectStatus(
   }
 
   if (options.withHermes) {
-    checks.push(await checkHermes());
+    checks.push(await checkHermes(env));
   }
 
   return {
@@ -67,13 +70,15 @@ export async function collectStatus(
 
 export async function runSetup(
   options: SetupOptions,
-  io: PromptIo = { input: process.stdin, output: process.stdout }
+  io: PromptIo = { input: process.stdin, output: process.stdout },
+  env: NodeJS.ProcessEnv = process.env
 ): Promise<StatusReport> {
   io.output.write("Running x-hermes setup checks...\n");
 
   let status = await collectStatus({
     withHermes: options.withHermes,
-    mutateStorage: false
+    mutateStorage: false,
+    env
   });
 
   printChecks(status.checks, io);
@@ -110,18 +115,19 @@ export async function runSetup(
     }
 
     io.output.write("Installing xurl...\n");
-    const code = await runProcessInherited("bash", ["-lc", INSTALL_XURL_COMMAND]);
+    const code = await runProcessInherited("bash", ["-lc", INSTALL_XURL_COMMAND], env);
     if (code !== 0) {
       io.output.write("xurl installer failed. Rerun setup after installing xurl.\n");
-      return await collectStatus({ withHermes: options.withHermes, mutateStorage: false });
+      return await collectStatus({ withHermes: options.withHermes, mutateStorage: false, env });
     }
   }
 
-  await collectStatus({ withHermes: options.withHermes, mutateStorage: true });
+  await collectStatus({ withHermes: options.withHermes, mutateStorage: true, env });
 
   status = await collectStatus({
     withHermes: options.withHermes,
-    mutateStorage: false
+    mutateStorage: false,
+    env
   });
 
   if (status.ready) {
@@ -146,7 +152,7 @@ export async function runSetup(
     return status;
   }
 
-  const loaded = await loadConfig();
+  const loaded = await loadConfig(env);
   const nextConfig = await promptForConfig(loaded, io);
 
   io.output.write("\nConfiguring xurl app profile...\n");
@@ -165,14 +171,15 @@ export async function runSetup(
     ],
     {
       timeoutMs: 30_000,
-      secrets: [nextConfig.clientId, nextConfig.clientSecret]
+      secrets: [nextConfig.clientId, nextConfig.clientSecret],
+      env
     }
   );
 
   if (!appResult.ok) {
     io.output.write("Failed to configure the xurl app profile.\n");
     printProcessOutput(appResult.stdout, appResult.stderr, io);
-    return await collectStatus({ withHermes: options.withHermes, mutateStorage: false });
+    return await collectStatus({ withHermes: options.withHermes, mutateStorage: false, env });
   }
 
   printProcessOutput(appResult.stdout, appResult.stderr, io);
@@ -184,31 +191,32 @@ export async function runSetup(
     "--app",
     nextConfig.config.xurlApp,
     nextConfig.config.username
-  ]);
+  ], env);
   if (oauthCode !== 0) {
     io.output.write("xurl OAuth flow failed or was cancelled.\n");
-    return await collectStatus({ withHermes: options.withHermes, mutateStorage: false });
+    return await collectStatus({ withHermes: options.withHermes, mutateStorage: false, env });
   }
 
   const defaultResult = await runXurl(
     ["auth", "default", nextConfig.config.xurlApp, nextConfig.config.username],
     {
-      timeoutMs: 15_000
+      timeoutMs: 15_000,
+      env
     }
   );
   if (!defaultResult.ok) {
     io.output.write("Failed to set xurl default app/account.\n");
     printProcessOutput(defaultResult.stdout, defaultResult.stderr, io);
-    return await collectStatus({ withHermes: options.withHermes, mutateStorage: false });
+    return await collectStatus({ withHermes: options.withHermes, mutateStorage: false, env });
   }
 
-  await saveConfig(nextConfig.config);
+  await saveConfig(nextConfig.config, env);
   io.output.write(`Saved non-secret config to ${loaded.path}\n`);
 
-  const whoami = await runXurl(["whoami"], { timeoutMs: 15_000 });
+  const whoami = await runXurl(["whoami"], { timeoutMs: 15_000, env });
   printProcessOutput(whoami.stdout, whoami.stderr, io);
 
-  await maybeRunSearchSmokeCheck(nextConfig.config.username, io);
+  await maybeRunSearchSmokeCheck(nextConfig.config.username, io, env);
 
   if (options.withHermes) {
     printHermesMcpConfig(io);
@@ -216,7 +224,8 @@ export async function runSetup(
 
   status = await collectStatus({
     withHermes: options.withHermes,
-    mutateStorage: false
+    mutateStorage: false,
+    env
   });
 
   return status;
@@ -409,9 +418,10 @@ function checkXurlWhoami(ok: boolean, output: string): DiagnosticCheck {
   };
 }
 
-async function checkHermes(): Promise<DiagnosticCheck> {
+async function checkHermes(env: NodeJS.ProcessEnv): Promise<DiagnosticCheck> {
+  const command = env.X_HERMES_HERMES_BIN || "hermes";
   const result = await import("./process.js").then(({ runProcess }) =>
-    runProcess("hermes", ["--help"], { timeoutMs: 10_000 })
+    runProcess(command, ["--help"], { timeoutMs: 10_000, env })
   );
 
   if (result.ok) {
@@ -469,7 +479,11 @@ async function promptForConfig(
   };
 }
 
-async function maybeRunSearchSmokeCheck(username: string, io: PromptIo): Promise<void> {
+async function maybeRunSearchSmokeCheck(
+  username: string,
+  io: PromptIo,
+  env: NodeJS.ProcessEnv
+): Promise<void> {
   const runSearch = await promptConfirm(io, "Run a short xurl search smoke test?", {
     defaultValue: false
   });
@@ -479,7 +493,7 @@ async function maybeRunSearchSmokeCheck(username: string, io: PromptIo): Promise
 
   const handle = username.replace(/^@/, "");
   const query = `from:${handle} -is:retweet`;
-  const result = await runXurl(["search", query, "-n", "3"], { timeoutMs: 20_000 });
+  const result = await runXurl(["search", query, "-n", "3"], { timeoutMs: 20_000, env });
   if (!result.ok) {
     io.output.write("Search smoke test failed. This may be due to X API plan access.\n");
   }

@@ -4,6 +4,7 @@ import type { ProcessResult } from "./types.js";
 export interface XurlRunOptions {
   timeoutMs?: number;
   secrets?: string[];
+  env?: NodeJS.ProcessEnv;
 }
 
 const REDACT_NEXT_FLAGS = new Set(["--client-id", "--client-secret"]);
@@ -82,9 +83,11 @@ export async function runXurl(
   options: XurlRunOptions = {}
 ): Promise<ProcessResult> {
   assertAllowedXurlArgs(args);
-  const result = await runProcess("xurl", args, {
+  const command = getXurlCommand(options.env);
+  const result = await runProcess(command, args, {
     timeoutMs: options.timeoutMs,
-    secrets: options.secrets
+    secrets: options.secrets,
+    env: options.env
   });
   return {
     ...result,
@@ -92,8 +95,14 @@ export async function runXurl(
   };
 }
 
-export async function runXurlInherited(args: string[]): Promise<number | null> {
+export async function runXurlInherited(
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env
+): Promise<number | null> {
   assertAllowedXurlArgs(args);
-  return await runProcessInherited("xurl", args);
+  return await runProcessInherited(getXurlCommand(env), args, env);
 }
 
+export function getXurlCommand(env: NodeJS.ProcessEnv = process.env): string {
+  return env.X_HERMES_XURL_BIN || "xurl";
+}

@@ -76,9 +76,14 @@ export async function runProcess(
   });
 }
 
-export async function runProcessInherited(command: string, args: string[]): Promise<number | null> {
+export async function runProcessInherited(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env
+): Promise<number | null> {
   return await new Promise<number | null>((resolve) => {
     const child = spawn(command, args, {
+      env,
       stdio: "inherit"
     });
 
@@ -94,4 +99,3 @@ export async function runProcessInherited(command: string, args: string[]): Prom
     child.on("close", (code) => finish(code));
   });
 }
-
