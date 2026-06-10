@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { collectStatus } from "./setup.js";
+import type { CandidateStatus } from "./types.js";
 
 const SERVER_INFO = {
   name: "x-hermes",
@@ -80,7 +81,7 @@ class MinimalMcpServer {
     }
 
     try {
-      const result = await handleRequest(request);
+      const result = await handleMcpRequest(request);
       this.writeResponse(request.id ?? null, undefined, result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -105,7 +106,7 @@ class MinimalMcpServer {
   }
 }
 
-async function handleRequest(request: JsonRpcRequest): Promise<unknown> {
+export async function handleMcpRequest(request: JsonRpcRequest): Promise<unknown> {
   switch (request.method) {
     case "initialize":
       return {
@@ -130,6 +131,121 @@ async function handleRequest(request: JsonRpcRequest): Promise<unknown> {
               additionalProperties: false,
               properties: {}
             }
+          },
+          {
+            name: "scan_recent_posts",
+            description: "Run x-hermes scan for a direct query, a watch query, or all enabled watch queries.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                query: { type: "string" },
+                watchQueryId: { type: "string" },
+                limit: { type: "number" }
+              }
+            }
+          },
+          {
+            name: "list_candidates",
+            description: "List stored candidates.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                status: { type: "string" },
+                limit: { type: "number" }
+              }
+            }
+          },
+          {
+            name: "get_candidate",
+            description: "Get one candidate and its latest draft.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["tweetId"],
+              properties: {
+                tweetId: { type: "string" }
+              }
+            }
+          },
+          {
+            name: "queue_reply_draft",
+            description: "Queue a reply draft for human approval.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["tweetId", "text"],
+              properties: {
+                tweetId: { type: "string" },
+                text: { type: "string" },
+                draftedBy: { type: "string" }
+              }
+            }
+          },
+          {
+            name: "approve_candidate",
+            description: "Approve a candidate that has a queued draft.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["tweetId", "approvedBy"],
+              properties: {
+                tweetId: { type: "string" },
+                approvedBy: { type: "string" },
+                reason: { type: "string" }
+              }
+            }
+          },
+          {
+            name: "reject_candidate",
+            description: "Reject a candidate.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["tweetId"],
+              properties: {
+                tweetId: { type: "string" },
+                actor: { type: "string" },
+                reason: { type: "string" }
+              }
+            }
+          },
+          {
+            name: "post_approved_reply",
+            description: "Post an approved reply only when all guardrails pass.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["tweetId"],
+              properties: {
+                tweetId: { type: "string" },
+                actor: { type: "string" }
+              }
+            }
+          },
+          {
+            name: "record_opt_out",
+            description: "Record a user opt-out.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["username"],
+              properties: {
+                username: { type: "string" },
+                actor: { type: "string" },
+                reason: { type: "string" }
+              }
+            }
+          },
+          {
+            name: "get_stats",
+            description: "Get x-hermes queue and audit stats.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {}
+            }
           }
         ]
       };
@@ -143,28 +259,109 @@ async function handleRequest(request: JsonRpcRequest): Promise<unknown> {
 }
 
 async function handleToolCall(params: Record<string, unknown>): Promise<unknown> {
-  if (params.name !== "status") {
-    return {
-      isError: true,
-      content: [
-        {
-          type: "text",
-          text: `Unsupported tool: ${String(params.name)}`
-        }
-      ]
-    };
-  }
+  const name = asString(params.name);
+  const args = isRecord(params.arguments) ? params.arguments : {};
 
-  const report = await collectStatus({ withHermes: false, mutateStorage: false });
-  return {
-    isError: false,
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(report, null, 2)
+  try {
+    switch (name) {
+      case "status": {
+        const report = await collectStatus({ withHermes: false, mutateStorage: false });
+        return toolResult(report);
       }
-    ]
-  };
+
+      case "scan_recent_posts": {
+        const { scanRecentPosts } = await import("./scanner.js");
+        return toolResult(
+          await scanRecentPosts({
+            query: optionalString(args.query),
+            watchQueryId: optionalString(args.watchQueryId),
+            limit: optionalNumber(args.limit) ?? 25
+          })
+        );
+      }
+
+      case "list_candidates": {
+        const { listCandidates } = await import("./queue.js");
+        return toolResult(
+          await listCandidates({
+            status: optionalString(args.status) as CandidateStatus | undefined,
+            limit: optionalNumber(args.limit) ?? 50
+          })
+        );
+      }
+
+      case "get_candidate": {
+        const { getCandidateDetails } = await import("./queue.js");
+        return toolResult(await getCandidateDetails({ tweetId: requiredString(args.tweetId, "tweetId") }));
+      }
+
+      case "queue_reply_draft": {
+        const { queueReplyDraft } = await import("./queue.js");
+        return toolResult(
+          await queueReplyDraft({
+            tweetId: requiredString(args.tweetId, "tweetId"),
+            text: requiredString(args.text, "text"),
+            draftedBy: optionalString(args.draftedBy) ?? "hermes"
+          })
+        );
+      }
+
+      case "approve_candidate": {
+        const { approveCandidate } = await import("./queue.js");
+        return toolResult(
+          await approveCandidate({
+            tweetId: requiredString(args.tweetId, "tweetId"),
+            approvedBy: requiredString(args.approvedBy, "approvedBy"),
+            reason: optionalString(args.reason)
+          })
+        );
+      }
+
+      case "reject_candidate": {
+        const { rejectCandidate } = await import("./queue.js");
+        await rejectCandidate({
+          tweetId: requiredString(args.tweetId, "tweetId"),
+          actor: optionalString(args.actor) ?? "hermes",
+          reason: optionalString(args.reason)
+        });
+        return toolResult({ rejected: true, tweetId: args.tweetId });
+      }
+
+      case "post_approved_reply": {
+        const { postApprovedReply } = await import("./posting.js");
+        const result = await postApprovedReply({
+          tweetId: requiredString(args.tweetId, "tweetId"),
+          actor: optionalString(args.actor) ?? "hermes"
+        });
+        return result.posted ? toolResult(result) : toolError(result);
+      }
+
+      case "record_opt_out": {
+        const { recordOptOut } = await import("./queue.js");
+        await recordOptOut({
+          username: requiredString(args.username, "username"),
+          actor: optionalString(args.actor) ?? "hermes",
+          reason: optionalString(args.reason)
+        });
+        return toolResult({ recorded: true, username: args.username });
+      }
+
+      case "get_stats": {
+        const { openXHermesDatabase } = await import("./db.js");
+        const db = await openXHermesDatabase();
+        try {
+          return toolResult(db.getStats());
+        } finally {
+          db.close();
+        }
+      }
+
+      default:
+        return toolError(`Unsupported tool: ${String(name)}`);
+    }
+  } catch (error) {
+    return toolError(error instanceof Error ? error.message : String(error));
+  }
 }
 
 function parseContentLength(header: string): number | null {
@@ -176,6 +373,54 @@ function parseContentLength(header: string): number | null {
     }
   }
   return null;
+}
+
+function toolResult(value: unknown): unknown {
+  return {
+    isError: false,
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(value, null, 2)
+      }
+    ]
+  };
+}
+
+function toolError(value: unknown): unknown {
+  return {
+    isError: true,
+    content: [
+      {
+        type: "text",
+        text: typeof value === "string" ? value : JSON.stringify(value, null, 2)
+      }
+    ]
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function requiredString(value: unknown, name: string): string {
+  const result = optionalString(value);
+  if (!result) {
+    throw new Error(`Missing required argument: ${name}`);
+  }
+  return result;
 }
 
 if (isDirectExecution()) {
