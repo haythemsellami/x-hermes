@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { collectStatus } from "./setup.js";
 import type { CandidateStatus } from "./types.js";
 
+type McpResponseMode = "headers" | "lines";
+
 const SERVER_INFO = {
   name: "x-hermes",
   version: "0.1.0"
@@ -24,52 +26,71 @@ export async function startMcpServer(): Promise<void> {
   server.start();
 }
 
-class MinimalMcpServer {
+export class MinimalMcpServer {
   private buffer = Buffer.alloc(0);
 
+  constructor(
+    private readonly input: NodeJS.ReadableStream = process.stdin,
+    private readonly output: NodeJS.WritableStream = process.stdout,
+    private readonly errorOutput: NodeJS.WritableStream = process.stderr
+  ) {}
+
   start(): void {
-    process.stdin.on("data", (chunk: Buffer) => this.onData(chunk));
-    process.stdin.on("error", (error) => {
-      process.stderr.write(`mcp stdin error: ${error.message}\n`);
+    this.input.on("data", (chunk: Buffer | string) => this.onData(Buffer.from(chunk)));
+    this.input.on("error", (error: Error) => {
+      this.errorOutput.write(`mcp stdin error: ${error.message}\n`);
     });
-    process.stdin.resume();
+    this.input.resume?.();
   }
 
   private onData(chunk: Buffer): void {
     this.buffer = Buffer.concat([this.buffer, chunk]);
 
     while (true) {
-      const headerEnd = this.buffer.indexOf("\r\n\r\n");
-      if (headerEnd === -1) {
+      if (startsWithContentLengthHeader(this.buffer)) {
+        const header = findHeader(this.buffer);
+        if (!header) {
+          return;
+        }
+
+        const contentLength = parseContentLength(header.text);
+        if (contentLength === null) {
+          this.errorOutput.write("mcp message missing Content-Length header\n");
+          this.buffer = Buffer.alloc(0);
+          return;
+        }
+
+        const bodyStart = header.end + header.delimiterLength;
+        const bodyEnd = bodyStart + contentLength;
+        if (this.buffer.length < bodyEnd) {
+          return;
+        }
+
+        const body = this.buffer.slice(bodyStart, bodyEnd).toString("utf8");
+        this.buffer = this.buffer.slice(bodyEnd);
+        void this.handleBody(body, "headers");
+        continue;
+      }
+
+      const lineEnd = this.buffer.indexOf("\n");
+      if (lineEnd === -1) {
         return;
       }
 
-      const header = this.buffer.slice(0, headerEnd).toString("utf8");
-      const contentLength = parseContentLength(header);
-      if (contentLength === null) {
-        process.stderr.write("mcp message missing Content-Length header\n");
-        this.buffer = Buffer.alloc(0);
-        return;
+      const line = this.buffer.subarray(0, lineEnd).toString("utf8").replace(/\r$/, "");
+      this.buffer = this.buffer.subarray(lineEnd + 1);
+      if (line.trim()) {
+        void this.handleBody(line, "lines");
       }
-
-      const bodyStart = headerEnd + 4;
-      const bodyEnd = bodyStart + contentLength;
-      if (this.buffer.length < bodyEnd) {
-        return;
-      }
-
-      const body = this.buffer.slice(bodyStart, bodyEnd).toString("utf8");
-      this.buffer = this.buffer.slice(bodyEnd);
-      void this.handleBody(body);
     }
   }
 
-  private async handleBody(body: string): Promise<void> {
+  private async handleBody(body: string, responseMode: McpResponseMode): Promise<void> {
     let request: JsonRpcRequest;
     try {
       request = JSON.parse(body) as JsonRpcRequest;
     } catch {
-      this.writeResponse(null, {
+      this.writeResponse(responseMode, null, {
         code: -32700,
         message: "Parse error"
       });
@@ -82,10 +103,10 @@ class MinimalMcpServer {
 
     try {
       const result = await handleMcpRequest(request);
-      this.writeResponse(request.id ?? null, undefined, result);
+      this.writeResponse(responseMode, request.id ?? null, undefined, result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.writeResponse(request.id ?? null, {
+      this.writeResponse(responseMode, request.id ?? null, {
         code: -32603,
         message
       });
@@ -93,6 +114,7 @@ class MinimalMcpServer {
   }
 
   private writeResponse(
+    mode: McpResponseMode,
     id: string | number | null,
     error?: { code: number; message: string },
     result?: unknown
@@ -102,7 +124,11 @@ class MinimalMcpServer {
       id,
       ...(error ? { error } : { result })
     });
-    process.stdout.write(`Content-Length: ${Buffer.byteLength(payload, "utf8")}\r\n\r\n${payload}`);
+    if (mode === "lines") {
+      this.output.write(`${payload}\n`);
+      return;
+    }
+    this.output.write(`Content-Length: ${Buffer.byteLength(payload, "utf8")}\r\n\r\n${payload}`);
   }
 }
 
@@ -365,7 +391,7 @@ async function handleToolCall(params: Record<string, unknown>): Promise<unknown>
 }
 
 function parseContentLength(header: string): number | null {
-  for (const line of header.split("\r\n")) {
+  for (const line of header.split(/\r?\n/)) {
     const [key, value] = line.split(":").map((part) => part.trim());
     if (key.toLowerCase() === "content-length") {
       const parsed = Number(value);
@@ -373,6 +399,30 @@ function parseContentLength(header: string): number | null {
     }
   }
   return null;
+}
+
+function startsWithContentLengthHeader(buffer: Buffer): boolean {
+  return buffer.subarray(0, 16).toString("utf8").toLowerCase().startsWith("content-length:");
+}
+
+function findHeader(buffer: Buffer): { text: string; end: number; delimiterLength: number } | null {
+  const crlfEnd = buffer.indexOf("\r\n\r\n");
+  const lfEnd = buffer.indexOf("\n\n");
+  const candidates = [
+    crlfEnd === -1 ? undefined : { end: crlfEnd, delimiterLength: 4 },
+    lfEnd === -1 ? undefined : { end: lfEnd, delimiterLength: 2 }
+  ].filter((candidate): candidate is { end: number; delimiterLength: number } =>
+    Boolean(candidate)
+  );
+  if (!candidates.length) {
+    return null;
+  }
+
+  const selected = candidates.sort((a, b) => a.end - b.end)[0]!;
+  return {
+    ...selected,
+    text: buffer.subarray(0, selected.end).toString("utf8")
+  };
 }
 
 function toolResult(value: unknown): unknown {
