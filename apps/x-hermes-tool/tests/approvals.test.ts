@@ -125,12 +125,12 @@ async function openCandidateDb(): Promise<XHermesDatabase> {
     tweetId: "tweet-1",
     authorId: "user-1",
     authorUsername: "alice",
-    text: "Can Predikt help here?",
+    text: "Can this tool help here?",
     status: "found",
     score: 10,
     riskFlags: [],
     sensitive: false,
-    sourceQuery: "@Prediktxyz -is:retweet"
+    sourceQuery: "@example_tool -is:retweet"
   });
   return db;
 }

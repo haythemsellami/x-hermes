@@ -114,15 +114,23 @@ export async function scanRecentPosts(options: ScanOptions): Promise<ScanSummary
         for (const item of parsed.candidates) {
           const scoring = scoreCandidate(item.candidate, item.author, {
             optedOut: db.isOptedOut(item.author.username),
-            minimumFollowers: loaded.config.minimumFollowers,
-            minimumAccountAgeDays: loaded.config.minimumAccountAgeDays
+            minimumFollowers: loaded.config.quality.minimumFollowers,
+            minimumAccountAgeDays: loaded.config.quality.minimumAccountAgeDays,
+            skipSensitive: loaded.config.quality.skipSensitive,
+            skipScamLanguage: loaded.config.quality.skipScamLanguage
           });
-          const feedback = feedbackSignalsForCandidate(db, item.candidate);
+          const feedback = loaded.config.quality.useFeedbackSignals
+            ? feedbackSignalsForCandidate(db, item.candidate)
+            : { scoreDelta: 0, riskFlags: [], skip: false };
           item.candidate.score = scoring.score + feedback.scoreDelta;
           item.candidate.riskFlags = [...scoring.riskFlags, ...feedback.riskFlags];
           item.candidate.status = scoring.accepted && !feedback.skip ? "found" : "skipped";
+          const existingCandidate = db.getCandidate(item.candidate.tweetId);
+          if (existingCandidate && !["found", "skipped"].includes(existingCandidate.status)) {
+            item.candidate.status = existingCandidate.status;
+          }
           db.upsertAuthor(item.author);
-          if (!db.getCandidate(item.candidate.tweetId)) {
+          if (!existingCandidate) {
             newCandidates += 1;
           }
           stored.push(db.upsertCandidate(item.candidate));

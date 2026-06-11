@@ -44,6 +44,8 @@ describe("mcp", () => {
       "process_approval_response",
       "post_approved_reply",
       "record_opt_out",
+      "list_campaigns",
+      "run_campaigns_once",
       "get_stats",
       "get_feedback_profile"
     ]);

@@ -1,6 +1,22 @@
 #!/usr/bin/env node
 import { collectStatus, printStatusReport, runSetup } from "./setup.js";
-import type { ApprovalRequestStatus, CandidateStatus, SetupOptions } from "./types.js";
+import {
+  getConfigPath,
+  loadConfig,
+  normalizeConfig,
+  resolvedDefaultConfig,
+  saveConfig,
+  serializeConfig,
+  validateConfig
+} from "./config.js";
+import type {
+  ApprovalMode,
+  ApprovalRequestStatus,
+  CampaignConfig,
+  CandidateStatus,
+  SetupOptions,
+  XHermesConfig
+} from "./types.js";
 
 const VERSION = "0.1.0";
 
@@ -76,6 +92,18 @@ async function main(argv: string[]): Promise<number> {
       await startMcpServer();
       return 0;
     }
+
+    case "config":
+      return await runConfigCommand(parsed);
+
+    case "campaigns":
+      return await runCampaignsCommand(parsed);
+
+    case "run":
+      return await runRunCommand(parsed);
+
+    case "service":
+      return await runServiceCommand(parsed);
 
     case "watch-queries":
       return await runWatchQueryCommand(parsed);
@@ -158,6 +186,19 @@ Usage:
   x-hermes setup [--check-only] [--with-hermes] [--non-interactive] [--json]
   x-hermes status [--with-hermes] [--json]
   x-hermes doctor [--with-hermes] [--json]
+  x-hermes config init [--force]
+  x-hermes config show [--json]
+  x-hermes config validate
+  x-hermes config set <path> <value>
+  x-hermes campaigns add <id> --query <query> --reply-text <text> [--limit 10]
+  x-hermes campaigns list [--json]
+  x-hermes campaigns show <id> [--json]
+  x-hermes campaigns run <id> [--json]
+  x-hermes run [--once] [--campaign <id>] [--json]
+  x-hermes service install [--enable]
+  x-hermes service status [--json]
+  x-hermes service logs
+  x-hermes service uninstall
   x-hermes watch-queries add <name> --query <query>
   x-hermes watch-queries list [--json]
   x-hermes scan [--query <query> | --watch <id>] [--limit 25] [--json]
@@ -183,6 +224,317 @@ Usage:
 
 Setup collects X OAuth secrets only through local terminal prompts.
 `);
+}
+
+async function runConfigCommand(parsed: ParsedArgs): Promise<number> {
+  switch (parsed.subcommand) {
+    case "init": {
+      const loaded = await loadConfig();
+      const target = getConfigPath();
+      if (loaded.exists && loaded.path === target && !hasFlag(parsed, "--force")) {
+        process.stdout.write(`Config already exists at ${target}\n`);
+        return 0;
+      }
+      const savedPath = await saveConfig(loaded.config);
+      process.stdout.write(`Wrote config to ${savedPath}\n`);
+      return 0;
+    }
+
+    case "path": {
+      process.stdout.write(`${getConfigPath()}\n`);
+      return 0;
+    }
+
+    case "show": {
+      const loaded = await loadConfig();
+      if (hasFlag(parsed, "--json")) {
+        process.stdout.write(`${JSON.stringify(loaded.config, null, 2)}\n`);
+      } else {
+        process.stdout.write(serializeConfig(loaded.config));
+      }
+      return 0;
+    }
+
+    case "validate": {
+      const loaded = await loadConfig();
+      const errors = validateConfig(loaded.config);
+      if (errors.length === 0) {
+        process.stdout.write(`Config is valid: ${loaded.path}\n`);
+        return 0;
+      }
+      process.stderr.write(`Config has ${errors.length} issue(s):\n`);
+      for (const error of errors) {
+        process.stderr.write(`  - ${error}\n`);
+      }
+      return 1;
+    }
+
+    case "set": {
+      const keyPath = parsed.positionals[0];
+      const rawValue = parsed.positionals.slice(1).join(" ");
+      if (!keyPath || rawValue.length === 0) {
+        process.stderr.write("Usage: x-hermes config set <path> <value>\n");
+        return 2;
+      }
+      const loaded = await loadConfig();
+      const beforeErrors = new Set(validateConfig(loaded.config));
+      const next = structuredClone(loaded.config) as XHermesConfig;
+      setConfigValue(next as unknown as Record<string, unknown>, keyPath, parseConfigValue(rawValue));
+      const normalized = normalizeConfig(resolvedDefaultConfig(), next);
+      const afterErrors = validateConfig(normalized);
+      const newErrors = afterErrors.filter((error) => !beforeErrors.has(error));
+      if (newErrors.length > 0) {
+        process.stderr.write("Refusing to save invalid config change:\n");
+        for (const error of newErrors) {
+          process.stderr.write(`  - ${error}\n`);
+        }
+        return 1;
+      }
+      const savedPath = await saveConfig(normalized);
+      process.stdout.write(`Updated ${keyPath} in ${savedPath}\n`);
+      if (afterErrors.length > 0) {
+        process.stderr.write("Config still needs attention:\n");
+        for (const error of afterErrors) {
+          process.stderr.write(`  - ${error}\n`);
+        }
+      }
+      return 0;
+    }
+
+    default:
+      process.stderr.write("Usage: x-hermes config <init|path|show|validate|set>\n");
+      return 2;
+  }
+}
+
+async function runCampaignsCommand(parsed: ParsedArgs): Promise<number> {
+  switch (parsed.subcommand) {
+    case "add": {
+      const id = parsed.positionals[0];
+      const query = getStringFlag(parsed, "--query");
+      const replyText = getStringFlag(parsed, "--reply-text") ?? getStringFlag(parsed, "--text");
+      if (!id || !query || !replyText) {
+        process.stderr.write(
+          "Usage: x-hermes campaigns add <id> --query <query> --reply-text <text> [--limit 10]\n"
+        );
+        return 2;
+      }
+
+      const loaded = await loadConfig();
+      const beforeErrors = new Set(validateConfig(loaded.config));
+      const next = structuredClone(loaded.config) as XHermesConfig;
+      const existingIndex = next.campaigns.findIndex((campaign) => campaign.id === id);
+      if (existingIndex >= 0 && !hasFlag(parsed, "--force")) {
+        process.stderr.write(`Campaign already exists: ${id}. Use --force to replace it.\n`);
+        return 1;
+      }
+      const postLimit = getNumberFlag(parsed, "--post-limit", getNumberFlag(parsed, "--limit", 10));
+      const campaign: CampaignConfig = {
+        id,
+        enabled: getBooleanFlag(parsed, "--enabled", true),
+        query,
+        replyText,
+        fetchLimit: getNumberFlag(parsed, "--fetch-limit", 25),
+        postLimit,
+        approvalMode: getApprovalMode(parsed),
+        dryRun: getOptionalBooleanFlag(parsed, "--dry-run"),
+        requireOptInForAutoPost: hasFlag(parsed, "--allow-cold-replies")
+          ? false
+          : getOptionalBooleanFlag(parsed, "--require-opt-in")
+      };
+      if (campaign.approvalMode === undefined) {
+        delete campaign.approvalMode;
+      }
+      if (campaign.dryRun === undefined) {
+        delete campaign.dryRun;
+      }
+      if (campaign.requireOptInForAutoPost === undefined) {
+        delete campaign.requireOptInForAutoPost;
+      }
+
+      if (existingIndex >= 0) {
+        next.campaigns[existingIndex] = campaign;
+      } else {
+        next.campaigns.push(campaign);
+      }
+      const normalized = normalizeConfig(resolvedDefaultConfig(), next);
+      const errors = validateConfig(normalized);
+      const newErrors = errors.filter((error) => !beforeErrors.has(error));
+      if (newErrors.length > 0) {
+        process.stderr.write("Campaign config is invalid:\n");
+        for (const error of newErrors) {
+          process.stderr.write(`  - ${error}\n`);
+        }
+        return 1;
+      }
+      const savedPath = await saveConfig(normalized);
+      process.stdout.write(`Saved campaign ${id} to ${savedPath}\n`);
+      if (errors.length > 0) {
+        process.stderr.write("Config still needs attention:\n");
+        for (const error of errors) {
+          process.stderr.write(`  - ${error}\n`);
+        }
+      }
+      return 0;
+    }
+
+    case "list": {
+      const loaded = await loadConfig();
+      if (hasFlag(parsed, "--json")) {
+        process.stdout.write(`${JSON.stringify(loaded.config.campaigns, null, 2)}\n`);
+        return 0;
+      }
+      if (loaded.config.campaigns.length === 0) {
+        process.stdout.write("No campaigns configured.\n");
+        return 0;
+      }
+      for (const campaign of loaded.config.campaigns) {
+        const state = campaign.enabled ? "enabled" : "disabled";
+        process.stdout.write(
+          `${campaign.id}\t${state}\tfetch=${campaign.fetchLimit}\tpost=${campaign.postLimit}\t${campaign.query}\n`
+        );
+      }
+      return 0;
+    }
+
+    case "show": {
+      const id = parsed.positionals[0];
+      if (!id) {
+        process.stderr.write("Usage: x-hermes campaigns show <id> [--json]\n");
+        return 2;
+      }
+      const loaded = await loadConfig();
+      const campaign = loaded.config.campaigns.find((item) => item.id === id);
+      if (!campaign) {
+        process.stderr.write(`Campaign not found: ${id}\n`);
+        return 1;
+      }
+      if (hasFlag(parsed, "--json")) {
+        process.stdout.write(`${JSON.stringify(campaign, null, 2)}\n`);
+      } else {
+        process.stdout.write(serializeConfig({ ...loaded.config, campaigns: [campaign] }));
+      }
+      return 0;
+    }
+
+    case "run": {
+      const campaignId = parsed.positionals[0];
+      const { runCampaignsOnce } = await import("./campaigns.js");
+      const summary = await runCampaignsOnce({
+        campaignId,
+        output: hasFlag(parsed, "--json") ? process.stderr : process.stdout
+      });
+      if (hasFlag(parsed, "--json")) {
+        process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+      } else {
+        printCampaignRunSummary(summary);
+      }
+      return hasCampaignFailures(summary) ? 1 : 0;
+    }
+
+    default:
+      process.stderr.write("Usage: x-hermes campaigns <add|list|show|run>\n");
+      return 2;
+  }
+}
+
+async function runRunCommand(parsed: ParsedArgs): Promise<number> {
+  const campaignId = getStringFlag(parsed, "--campaign");
+  const loaded = await loadConfig();
+  const runOnce = hasFlag(parsed, "--once") || loaded.config.runtime.mode === "once";
+  if (runOnce) {
+    const { runCampaignsOnce } = await import("./campaigns.js");
+    const summary = await runCampaignsOnce({
+      campaignId,
+      output: hasFlag(parsed, "--json") ? process.stderr : process.stdout
+    });
+    if (hasFlag(parsed, "--json")) {
+      process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+    } else {
+      printCampaignRunSummary(summary);
+    }
+    return hasCampaignFailures(summary) ? 1 : 0;
+  }
+
+  const { runCampaignDaemon } = await import("./campaigns.js");
+  const controller = new AbortController();
+  process.once("SIGINT", () => controller.abort());
+  process.once("SIGTERM", () => controller.abort());
+  process.stdout.write(
+    `x-hermes is running. Scan interval: ${loaded.config.runtime.scanIntervalMinutes} minute(s).\n`
+  );
+  await runCampaignDaemon({
+    campaignId,
+    output: hasFlag(parsed, "--json") ? process.stderr : process.stdout,
+    signal: controller.signal
+  });
+  return 0;
+}
+
+async function runServiceCommand(parsed: ParsedArgs): Promise<number> {
+  const { getServiceInfo, installService, uninstallService } = await import("./service.js");
+  switch (parsed.subcommand) {
+    case "install": {
+      const info = await installService({ enable: hasFlag(parsed, "--enable") });
+      process.stdout.write(`Wrote ${info.manager} service: ${info.path}\n`);
+      if (info.enabled) {
+        process.stdout.write("Service enabled and started.\n");
+      } else if (info.installCommands.length > 0) {
+        process.stdout.write("To enable it, run:\n");
+        for (const command of info.installCommands) {
+          process.stdout.write(`  ${command}\n`);
+        }
+      }
+      if (info.logCommand) {
+        process.stdout.write(`Logs: ${info.logCommand}\n`);
+      }
+      if (info.enableOutput?.trim()) {
+        process.stdout.write(`${info.enableOutput.trim()}\n`);
+      }
+      return info.enabled || !hasFlag(parsed, "--enable") ? 0 : 1;
+    }
+
+    case "status": {
+      const info = await getServiceInfo();
+      if (hasFlag(parsed, "--json")) {
+        process.stdout.write(`${JSON.stringify(info, null, 2)}\n`);
+        return 0;
+      }
+      process.stdout.write(`Manager: ${info.manager}\n`);
+      process.stdout.write(`Path: ${info.path || "unsupported"}\n`);
+      process.stdout.write(`Installed: ${info.exists ? "yes" : "no"}\n`);
+      if (info.installCommands.length > 0) {
+        process.stdout.write("Enable commands:\n");
+        for (const command of info.installCommands) {
+          process.stdout.write(`  ${command}\n`);
+        }
+      }
+      if (info.logCommand) {
+        process.stdout.write(`Logs: ${info.logCommand}\n`);
+      }
+      return info.manager === "unsupported" ? 1 : 0;
+    }
+
+    case "logs": {
+      const info = await getServiceInfo();
+      if (!info.logCommand) {
+        process.stderr.write("No service log command is available for this platform.\n");
+        return 1;
+      }
+      process.stdout.write(`${info.logCommand}\n`);
+      return 0;
+    }
+
+    case "uninstall": {
+      const info = await uninstallService();
+      process.stdout.write(`Removed service file: ${info.path || "unsupported"}\n`);
+      return 0;
+    }
+
+    default:
+      process.stderr.write("Usage: x-hermes service <install|status|logs|uninstall>\n");
+      return 2;
+  }
 }
 
 async function runWatchQueryCommand(parsed: ParsedArgs): Promise<number> {
@@ -627,6 +979,155 @@ async function runStatsCommand(parsed: ParsedArgs): Promise<number> {
   } finally {
     db.close();
   }
+}
+
+function setConfigValue(target: Record<string, unknown>, keyPath: string, value: unknown): void {
+  const segments = keyPath.split(".").filter(Boolean);
+  if (segments.length === 0) {
+    throw new Error("Config path cannot be empty.");
+  }
+
+  let cursor: Record<string, unknown> | unknown[] = target;
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const segment = segments[index] ?? "";
+    const nextSegment = segments[index + 1] ?? "";
+    const nextIsArray = /^\d+$/.test(nextSegment);
+    if (Array.isArray(cursor)) {
+      const arrayIndex = Number(segment);
+      if (!Number.isInteger(arrayIndex) || arrayIndex < 0) {
+        throw new Error(`Invalid array index in config path: ${segment}`);
+      }
+      if (cursor[arrayIndex] === undefined) {
+        cursor[arrayIndex] = nextIsArray ? [] : {};
+      }
+      cursor = cursor[arrayIndex] as Record<string, unknown> | unknown[];
+      continue;
+    }
+    if (cursor[segment] === undefined) {
+      cursor[segment] = nextIsArray ? [] : {};
+    }
+    cursor = cursor[segment] as Record<string, unknown> | unknown[];
+  }
+
+  const leaf = segments[segments.length - 1] ?? "";
+  if (Array.isArray(cursor)) {
+    const arrayIndex = Number(leaf);
+    if (!Number.isInteger(arrayIndex) || arrayIndex < 0) {
+      throw new Error(`Invalid array index in config path: ${leaf}`);
+    }
+    cursor[arrayIndex] = value;
+    return;
+  }
+  cursor[leaf] = value;
+}
+
+function parseConfigValue(raw: string): unknown {
+  const trimmed = raw.trim();
+  if (trimmed === "true") {
+    return true;
+  }
+  if (trimmed === "false") {
+    return false;
+  }
+  if (trimmed === "null") {
+    return null;
+  }
+  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+  if (
+    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+    (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+    (trimmed.startsWith("\"") && trimmed.endsWith("\""))
+  ) {
+    return JSON.parse(trimmed);
+  }
+  return raw;
+}
+
+function getApprovalMode(parsed: ParsedArgs): ApprovalMode | undefined {
+  if (hasFlag(parsed, "--no-approval")) {
+    return "none";
+  }
+  if (hasFlag(parsed, "--require-approval")) {
+    return "required";
+  }
+  const value = getStringFlag(parsed, "--approval-mode") ?? getStringFlag(parsed, "--approval");
+  if (!value) {
+    return undefined;
+  }
+  if (value === "required" || value === "none" || value === "opt_in_auto_post") {
+    return value;
+  }
+  throw new Error("Approval mode must be required, none, or opt_in_auto_post.");
+}
+
+function getOptionalBooleanFlag(parsed: ParsedArgs, flag: string): boolean | undefined {
+  if (!parsed.flags.has(flag)) {
+    return undefined;
+  }
+  return getBooleanFlag(parsed, flag, true);
+}
+
+function getBooleanFlag(parsed: ParsedArgs, flag: string, defaultValue: boolean): boolean {
+  const value = parsed.flags.get(flag);
+  if (value === undefined) {
+    return defaultValue;
+  }
+  if (value === true) {
+    return true;
+  }
+  if (/^(true|1|yes|y|on)$/i.test(value)) {
+    return true;
+  }
+  if (/^(false|0|no|n|off)$/i.test(value)) {
+    return false;
+  }
+  return defaultValue;
+}
+
+function printCampaignRunSummary(summary: {
+  campaigns: Array<{
+    campaignId: string;
+    fetched: number;
+    selected: number;
+    results: Array<{
+      action: string;
+      tweetId?: string;
+      authorUsername?: string;
+      score?: number;
+      reason?: string;
+      replyTweetId?: string;
+      approvalRequestId?: string;
+      guardrailFailures?: Array<{ id: string; message: string }>;
+    }>;
+  }>;
+}): void {
+  for (const campaign of summary.campaigns) {
+    process.stdout.write(
+      `Campaign ${campaign.campaignId}: fetched ${campaign.fetched}, selected ${campaign.selected}\n`
+    );
+    for (const result of campaign.results) {
+      const subject = result.tweetId
+        ? `${result.tweetId}${result.authorUsername ? ` @${result.authorUsername}` : ""}`
+        : "campaign";
+      const detail =
+        result.replyTweetId ??
+        result.approvalRequestId ??
+        result.reason ??
+        result.guardrailFailures?.map((failure) => failure.id).join(", ") ??
+        "";
+      process.stdout.write(`  ${result.action}\t${subject}${detail ? `\t${detail}` : ""}\n`);
+    }
+  }
+}
+
+function hasCampaignFailures(summary: {
+  campaigns: Array<{ results: Array<{ action: string }> }>;
+}): boolean {
+  return summary.campaigns.some((campaign) =>
+    campaign.results.some((result) => result.action === "failed")
+  );
 }
 
 function hasFlag(parsed: ParsedArgs, flag: string): boolean {

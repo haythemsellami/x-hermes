@@ -6,6 +6,7 @@ export interface RunProcessOptions {
   timeoutMs?: number;
   secrets?: string[];
   env?: NodeJS.ProcessEnv;
+  stdin?: string;
 }
 
 export function redactText(text: string, secrets: string[] = []): string {
@@ -37,7 +38,7 @@ export async function runProcess(
   return await new Promise<ProcessResult>((resolve) => {
     const child = spawn(command, args, {
       env: options.env,
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: options.stdin === undefined ? ["ignore", "pipe", "pipe"] : ["pipe", "pipe", "pipe"]
     });
 
     const stdout: Buffer[] = [];
@@ -69,8 +70,12 @@ export async function runProcess(
       finish(null);
     }, timeoutMs);
 
-    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    if (options.stdin !== undefined) {
+      child.stdin?.end(options.stdin);
+    }
+
+    child.stdout?.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk));
     child.on("error", () => finish(null));
     child.on("close", (code) => finish(code));
   });

@@ -19,7 +19,7 @@ export function evaluatePostingGuardrails(input: PostingGuardrailInput): Guardra
   const now = input.now ?? new Date();
   const failures: GuardrailFailure[] = [];
 
-  if (!input.config.postingEnabled) {
+  if (!input.config.posting.enabled) {
     failures.push({
       id: "posting_disabled",
       message: "Posting is disabled in config."
@@ -49,17 +49,17 @@ export function evaluatePostingGuardrails(input: PostingGuardrailInput): Guardra
 
   const sinceDailyWindow = new Date(now.getTime() - 86_400_000).toISOString();
   const postedToday = input.db.countPostedRepliesSince(sinceDailyWindow);
-  if (postedToday >= input.config.maxRepliesPerDay) {
+  if (postedToday >= input.config.posting.maxRepliesPerDay) {
     failures.push({
       id: "daily_cap_reached",
-      message: `Daily reply cap reached: ${postedToday}/${input.config.maxRepliesPerDay}.`
+      message: `Daily reply cap reached: ${postedToday}/${input.config.posting.maxRepliesPerDay}.`
     });
   }
 
   const latestAuthorReply = input.db.latestPostedReplyForAuthor(input.candidate.authorId);
   if (latestAuthorReply) {
     const ageHours = (now.getTime() - new Date(latestAuthorReply.postedAt).getTime()) / 3_600_000;
-    if (ageHours < input.config.perAuthorCooldownHours) {
+    if (ageHours < input.config.posting.perAuthorCooldownHours) {
       failures.push({
         id: "author_cooldown",
         message: `Author cooldown has not elapsed (${Math.max(0, ageHours).toFixed(1)}h).`
@@ -74,7 +74,7 @@ export function evaluatePostingGuardrails(input: PostingGuardrailInput): Guardra
     });
   }
 
-  if (input.config.blockDuplicateReplyText && input.draft) {
+  if (input.config.posting.blockDuplicateReplyText && input.draft) {
     const duplicateSince = new Date(now.getTime() - 7 * 86_400_000).toISOString();
     const duplicateCount = input.db.countDuplicateReplyTextSince(input.draft.text, duplicateSince);
     if (duplicateCount > 0) {
@@ -85,7 +85,7 @@ export function evaluatePostingGuardrails(input: PostingGuardrailInput): Guardra
     }
   }
 
-  if (input.config.requireOptInForAutoPost && !hasOptInEvidence(input.config, input.candidate)) {
+  if (input.config.posting.requireOptInForAutoPost && !hasOptInEvidence(input.config, input.candidate)) {
     failures.push({
       id: "missing_opt_in",
       message: "Candidate lacks opt-in evidence required for auto-posting."
@@ -106,9 +106,9 @@ export function evaluatePostingGuardrails(input: PostingGuardrailInput): Guardra
 }
 
 export function isWithinActiveHours(config: XHermesConfig, now: Date): boolean {
-  const currentMinutes = localMinutesInTimezone(now, config.activeHours.timezone);
-  const startMinutes = parseClockMinutes(config.activeHours.start);
-  const endMinutes = parseClockMinutes(config.activeHours.end);
+  const currentMinutes = localMinutesInTimezone(now, config.posting.activeHours.timezone);
+  const startMinutes = parseClockMinutes(config.posting.activeHours.start);
+  const endMinutes = parseClockMinutes(config.posting.activeHours.end);
 
   if (startMinutes === endMinutes) {
     return true;

@@ -29,7 +29,7 @@ Run setup in a local terminal:
 x-hermes setup
 ```
 
-Setup checks Node.js, platform support, storage, `xurl`, and X auth. Secrets are collected only through local prompts. `xurl` stores OAuth data in `~/.xurl`; `x-hermes` stores non-secret config in `~/.config/x-hermes/config.json`.
+Setup checks Node.js, platform support, storage, `xurl`, and X auth. Secrets are collected only through local prompts. `xurl` stores OAuth data in `~/.xurl`; `x-hermes` stores non-secret config in `~/.config/x-hermes/config.yaml`.
 
 Non-mutating checks:
 
@@ -44,7 +44,116 @@ Hermes MCP config helper:
 x-hermes setup --with-hermes
 ```
 
-## 3. Configure Watch Queries
+## 3. Configure YAML, Campaigns, and Watch Queries
+
+`x-hermes` supports two configuration styles:
+
+- use CLI commands that update local YAML for you
+- edit `~/.config/x-hermes/config.yaml` directly, then run `x-hermes config validate`
+
+Create or migrate the YAML config:
+
+```bash
+x-hermes config init
+x-hermes config show
+x-hermes config validate
+```
+
+Set a single value:
+
+```bash
+x-hermes config set runtime.scanIntervalMinutes 60
+x-hermes config set posting.enabled false
+```
+
+Campaigns are the preferred way to run repeatable scan/reply workflows:
+
+```bash
+x-hermes campaigns add "example" \
+  --query '"your topic" lang:en -is:retweet' \
+  --reply-text "Thanks for sharing." \
+  --fetch-limit 25 \
+  --limit 5
+```
+
+List or inspect campaigns:
+
+```bash
+x-hermes campaigns list
+x-hermes campaigns show example
+```
+
+Run one campaign once:
+
+```bash
+x-hermes campaigns run example
+```
+
+Run all enabled campaigns once:
+
+```bash
+x-hermes run --once
+```
+
+Run continuously using `runtime.scanIntervalMinutes`:
+
+```bash
+x-hermes run
+```
+
+Install a user service for continuous operation:
+
+```bash
+x-hermes service install
+x-hermes service status
+```
+
+Example YAML:
+
+```yaml
+xurlApp: x-hermes
+username: your_handle
+runtime:
+  mode: daemon
+  scanIntervalMinutes: 60
+  dryRun: true
+posting:
+  enabled: false
+  approvalMode: required
+  maxRepliesPerDay: 120
+  maxRepliesPerRun: 10
+  activeHours:
+    start: "09:00"
+    end: "21:00"
+    timezone: America/New_York
+  perAuthorCooldownHours: 50
+  blockDuplicateReplyText: true
+  requireOptInForAutoPost: true
+quality:
+  minimumFollowers: 1000
+  minimumAccountAgeDays: 300
+  skipSensitive: true
+  skipScamLanguage: true
+  useFeedbackSignals: true
+notifications:
+  onPost: true
+  onError: true
+  onApprovalRequest: true
+  channels:
+    - id: stdout
+      type: stdout
+      enabled: true
+campaigns:
+  - id: example
+    enabled: true
+    query: '"your topic" lang:en -is:retweet'
+    replyText: "Thanks for sharing."
+    fetchLimit: 25
+    postLimit: 5
+    approvalMode: required
+```
+
+Watch queries remain useful for manual scans and MCP-driven workflows.
 
 Add a reusable watch query:
 
@@ -159,16 +268,15 @@ x-hermes feedback examples --decision rejected
 
 Posting is disabled by default:
 
-```json
-{
-  "postingEnabled": false
-}
+```yaml
+posting:
+  enabled: false
 ```
 
-To enable posting, edit the local non-secret config:
+To enable posting, edit the local non-secret config or use `config set`:
 
-```text
-~/.config/x-hermes/config.json
+```bash
+x-hermes config set posting.enabled true
 ```
 
 Then post an approved candidate:
@@ -192,6 +300,26 @@ Posting fails closed unless all guardrails pass:
 - Opt-in evidence exists when `requireOptInForAutoPost` is enabled.
 
 Keyword-search candidates should generally remain human-approved and non-autonomous unless there is clear opt-in evidence.
+
+For explicit no-approval campaigns, configure both the approval mode and opt-in policy intentionally:
+
+```bash
+x-hermes campaigns add "example-auto" \
+  --query '"your topic" lang:en -is:retweet' \
+  --reply-text "Thanks for sharing." \
+  --no-approval \
+  --allow-cold-replies \
+  --limit 5
+```
+
+Then set:
+
+```bash
+x-hermes config set runtime.dryRun false
+x-hermes config set posting.enabled true
+```
+
+This is deliberately explicit because automated replies to cold keyword searches can have platform-policy and reputation risk.
 
 ## 8. MCP
 
@@ -234,6 +362,8 @@ edit_draft
 process_approval_response
 post_approved_reply
 record_opt_out
+list_campaigns
+run_campaigns_once
 get_stats
 get_feedback_profile
 ```

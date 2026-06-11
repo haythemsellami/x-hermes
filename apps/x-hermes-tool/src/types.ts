@@ -15,9 +15,76 @@ export interface ActiveHours {
   timezone: string;
 }
 
+export type RuntimeMode = "once" | "daemon";
+export type ApprovalMode = "required" | "none" | "opt_in_auto_post";
+export type NotificationChannelType = "stdout" | "command";
+export type NotificationEvent = "post" | "error" | "approval_request";
+
+export interface RuntimeConfig {
+  mode: RuntimeMode;
+  scanIntervalMinutes: number;
+  dryRun: boolean;
+}
+
+export interface PostingConfig {
+  enabled: boolean;
+  approvalMode: ApprovalMode;
+  maxRepliesPerDay: number;
+  maxRepliesPerRun: number;
+  activeHours: ActiveHours;
+  perAuthorCooldownHours: number;
+  blockDuplicateReplyText: boolean;
+  requireOptInForAutoPost: boolean;
+}
+
+export interface QualityConfig {
+  minimumFollowers: number;
+  minimumAccountAgeDays: number;
+  skipSensitive: boolean;
+  skipScamLanguage: boolean;
+  useFeedbackSignals: boolean;
+}
+
+export interface NotificationChannelConfig {
+  id: string;
+  type: NotificationChannelType;
+  enabled: boolean;
+  command?: string;
+  args?: string[];
+  events?: NotificationEvent[];
+}
+
+export interface NotificationsConfig {
+  onPost: boolean;
+  onError: boolean;
+  onApprovalRequest: boolean;
+  channels: NotificationChannelConfig[];
+}
+
+export interface CampaignConfig {
+  id: string;
+  enabled: boolean;
+  query: string;
+  replyText: string;
+  fetchLimit: number;
+  postLimit: number;
+  approvalMode?: ApprovalMode;
+  dryRun?: boolean;
+  requireOptInForAutoPost?: boolean;
+}
+
 export interface XHermesConfig {
   xurlApp: string;
   username: string;
+  runtime: RuntimeConfig;
+  posting: PostingConfig;
+  quality: QualityConfig;
+  notifications: NotificationsConfig;
+  campaigns: CampaignConfig[];
+  /**
+   * Compatibility aliases for older command paths. They are normalized from
+   * nested config values when loading YAML/JSON.
+   */
   activeHours: ActiveHours;
   maxRepliesPerDay: number;
   replyTextDefault: string;
@@ -231,6 +298,45 @@ export interface GuardrailResult {
 export const DEFAULT_CONFIG: XHermesConfig = {
   xurlApp: "x-hermes",
   username: "",
+  runtime: {
+    mode: "daemon",
+    scanIntervalMinutes: 60,
+    dryRun: true
+  },
+  posting: {
+    enabled: false,
+    approvalMode: "required",
+    maxRepliesPerDay: 120,
+    maxRepliesPerRun: 10,
+    activeHours: {
+      start: "09:00",
+      end: "21:00",
+      timezone: "America/New_York"
+    },
+    perAuthorCooldownHours: 50,
+    blockDuplicateReplyText: true,
+    requireOptInForAutoPost: true
+  },
+  quality: {
+    minimumFollowers: 1000,
+    minimumAccountAgeDays: 300,
+    skipSensitive: true,
+    skipScamLanguage: true,
+    useFeedbackSignals: true
+  },
+  notifications: {
+    onPost: true,
+    onError: true,
+    onApprovalRequest: true,
+    channels: [
+      {
+        id: "stdout",
+        type: "stdout",
+        enabled: true
+      }
+    ]
+  },
+  campaigns: [],
   activeHours: {
     start: "09:00",
     end: "21:00",

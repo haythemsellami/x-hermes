@@ -19,10 +19,13 @@ describe("guardrails", () => {
   it("checks active hours in the configured timezone", () => {
     const config = {
       ...DEFAULT_CONFIG,
-      activeHours: {
-        start: "09:00",
-        end: "21:00",
-        timezone: "America/New_York"
+      posting: {
+        ...DEFAULT_CONFIG.posting,
+        activeHours: {
+          start: "09:00",
+          end: "21:00",
+          timezone: "America/New_York"
+        }
       }
     };
 
@@ -43,7 +46,10 @@ describe("guardrails", () => {
         config: {
           ...DEFAULT_CONFIG,
           username: "xhermes",
-          postingEnabled: false
+          posting: {
+            ...DEFAULT_CONFIG.posting,
+            enabled: false
+          }
         },
         db,
         candidate,
@@ -79,9 +85,12 @@ describe("guardrails", () => {
         config: {
           ...DEFAULT_CONFIG,
           username: "xhermes",
-          postingEnabled: true,
-          requireOptInForAutoPost: false,
-          activeHours: { start: "00:00", end: "23:59", timezone: "UTC" }
+          posting: {
+            ...DEFAULT_CONFIG.posting,
+            enabled: true,
+            requireOptInForAutoPost: false,
+            activeHours: { start: "00:00", end: "23:59", timezone: "UTC" }
+          }
         },
         db,
         candidate,
@@ -94,10 +103,13 @@ describe("guardrails", () => {
         config: {
           ...DEFAULT_CONFIG,
           username: "xhermes",
-          postingEnabled: true,
-          blockDuplicateReplyText: false,
-          requireOptInForAutoPost: false,
-          activeHours: { start: "00:00", end: "23:59", timezone: "UTC" }
+          posting: {
+            ...DEFAULT_CONFIG.posting,
+            enabled: true,
+            blockDuplicateReplyText: false,
+            requireOptInForAutoPost: false,
+            activeHours: { start: "00:00", end: "23:59", timezone: "UTC" }
+          }
         },
         db,
         candidate,

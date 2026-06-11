@@ -147,16 +147,42 @@ Setup behavior:
    xurl whoami
    ```
 
-7. Store non-secret tool config in `~/.config/x-hermes/config.json` or a repo-local `.env` for development:
+7. Store non-secret tool config in `~/.config/x-hermes/config.yaml`. Legacy `config.json` may be read for migration, but new writes should be YAML:
 
-   ```json
-   {
-     "xurlApp": "x-hermes",
-     "username": "YOUR_USERNAME",
-     "activeHours": { "start": "09:00", "end": "21:00", "timezone": "America/New_York" },
-     "maxRepliesPerDay": 120,
-     "replyTextDefault": "Configure this per project"
-   }
+   ```yaml
+   xurlApp: x-hermes
+   username: YOUR_USERNAME
+   runtime:
+     mode: daemon
+     scanIntervalMinutes: 60
+     dryRun: true
+   posting:
+     enabled: false
+     approvalMode: required
+     maxRepliesPerDay: 120
+     maxRepliesPerRun: 10
+     activeHours:
+       start: "09:00"
+       end: "21:00"
+       timezone: America/New_York
+     perAuthorCooldownHours: 50
+     blockDuplicateReplyText: true
+     requireOptInForAutoPost: true
+   quality:
+     minimumFollowers: 1000
+     minimumAccountAgeDays: 300
+     skipSensitive: true
+     skipScamLanguage: true
+     useFeedbackSignals: true
+   notifications:
+     onPost: true
+     onError: true
+     onApprovalRequest: true
+     channels:
+       - id: stdout
+         type: stdout
+         enabled: true
+   campaigns: []
    ```
 
 8. Verify auth with:
@@ -238,11 +264,19 @@ Commands:
 ```bash
 x-hermes setup
 x-hermes status
+x-hermes config init
+x-hermes config show
+x-hermes config validate
+x-hermes campaigns add <id> --query <query> --reply-text <reply>
+x-hermes campaigns run <id>
+x-hermes run
+x-hermes run --once
+x-hermes service install
 x-hermes scan --limit 25
 x-hermes candidates list
 x-hermes candidates show <tweet-id>
 x-hermes draft <tweet-id> --text "Your reply text"
-x-hermes approve <tweet-id> --by haythem --reason "Reviewed manually"
+x-hermes approve <tweet-id> --by <actor> --reason "Reviewed manually"
 x-hermes reject <tweet-id> --reason "low relevance"
 x-hermes post-approved <tweet-id>
 x-hermes opt-out add @user
@@ -263,22 +297,41 @@ get_candidate
 queue_reply_draft
 approve_candidate
 reject_candidate
+list_approval_requests
+get_approval_request
+render_approval_request
+record_approval_delivery
+approve_request
+reject_request
+edit_draft
+process_approval_response
 post_approved_reply
 record_opt_out
+list_campaigns
+run_campaigns_once
 get_stats
+get_feedback_profile
 ```
 
 Posting MCP tool must be hard-gated. It should refuse unless all guardrails pass.
 
-### Cron
+### Managed Runtime
 
-Hermes cron can run the scan/review flow hourly:
+The preferred continuous mode is managed by `x-hermes` itself:
 
 ```bash
-hermes cron create "every 1h" --name x-hermes-scan "Use the X Hermes tool to scan for new relevant candidates, evaluate them, and queue drafts. Do not post unless the candidate is already approved and guardrails pass."
+x-hermes run
 ```
 
-The tool itself should also check active hours so a bad cron schedule cannot cause posting outside the allowed window.
+`x-hermes run` reads enabled YAML campaigns and scans every `runtime.scanIntervalMinutes`. It should support one-shot operation with `x-hermes run --once` and service installation with `x-hermes service install`.
+
+Hermes cron can still invoke one-shot runs when desired:
+
+```bash
+x-hermes run --once
+```
+
+The tool itself must always check active hours and posting guardrails so a bad schedule cannot cause posting outside the allowed window.
 
 ## Candidate Lifecycle
 
@@ -352,15 +405,15 @@ Hermes judgment should be used after deterministic filtering, not instead of it.
 Default guardrails:
 
 ```text
-maxRepliesPerDay: 120
-activeWindow: 12h/day, configurable
-minimumFollowers: 1000
-minimumAccountAgeDays: 300
-perAuthorCooldownHours: 50
-blockDuplicateReplyText: true
-requireApprovalForKeywordSearch: true
-requireOptInForAutoPost: true
-postingEnabled: false by default
+posting.maxRepliesPerDay: 120
+posting.activeHours: 12h/day by default, configurable
+quality.minimumFollowers: 1000
+quality.minimumAccountAgeDays: 300
+posting.perAuthorCooldownHours: 50
+posting.blockDuplicateReplyText: true
+posting.approvalMode: required by default
+posting.requireOptInForAutoPost: true
+posting.enabled: false by default
 ```
 
 Posting must fail closed when:
@@ -484,9 +537,11 @@ No direct generic shell command exposure to Hermes.
 
 ### M6: Operations
 
-- Hermes cron setup docs.
-- systemd/service docs for running alongside Hermes.
-- Optional dashboard or messaging-based approval later.
+- YAML-first config for campaigns, runtime, posting, quality, and notifications.
+- Managed `x-hermes run` daemon mode.
+- User service installation for Linux systemd and macOS launchd.
+- Messaging-gateway approval and notification adapters.
+- Optional dashboard later.
 
 ## Open Questions
 

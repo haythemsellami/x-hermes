@@ -3,7 +3,7 @@ import { openXHermesDatabase, type XHermesDatabase } from "./db.js";
 import { evaluatePostingGuardrails } from "./guardrails.js";
 import { buildReplyBody } from "./xapi.js";
 import { runXurl } from "./xurl.js";
-import type { GuardrailResult } from "./types.js";
+import type { GuardrailResult, XHermesConfig } from "./types.js";
 
 export interface PostApprovedReplyOptions {
   tweetId: string;
@@ -11,6 +11,7 @@ export interface PostApprovedReplyOptions {
   db?: XHermesDatabase;
   env?: NodeJS.ProcessEnv;
   now?: Date;
+  config?: XHermesConfig;
 }
 
 export interface PostApprovedReplyResult {
@@ -28,14 +29,14 @@ export async function postApprovedReply(
   const db = options.db ?? (await openXHermesDatabase({ env }));
 
   try {
-    const loaded = await loadConfig(env);
+    const config = options.config ?? (await loadConfig(env)).config;
     const candidate = db.getCandidate(options.tweetId);
     if (!candidate) {
       throw new Error(`Candidate not found: ${options.tweetId}`);
     }
     const draft = db.getLatestDraftForCandidate(options.tweetId);
     const guardrails = evaluatePostingGuardrails({
-      config: loaded.config,
+      config,
       db,
       candidate,
       draft,

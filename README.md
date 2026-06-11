@@ -36,12 +36,14 @@ Official X API
 
 - **One setup flow**: checks the platform, Node.js, local storage, `xurl`, X auth, and optional Hermes MCP integration.
 - **Safe auth model**: X OAuth credentials are collected only through local terminal prompts. `x-hermes` never asks for secrets through chat.
-- **Non-secret config**: tool config is stored in `~/.config/x-hermes/config.json`; X tokens remain under `~/.xurl`, managed by `xurl`.
+- **YAML configuration**: non-secret tool config is stored in `~/.config/x-hermes/config.yaml`; X tokens remain under `~/.xurl`, managed by `xurl`.
 - **Diagnostics**: `doctor` and `status` report readiness without reading or printing credential files.
 - **Hermes integration**: MCP server support gives Hermes a structured interface instead of generic shell access.
 - **Search ingestion**: watch queries and direct scans store candidates and authors locally.
+- **Config-driven campaigns**: reusable campaigns can be defined in YAML or added through the CLI, then run once or continuously.
 - **Deterministic scoring**: candidate scoring runs before Hermes judgment and records risk flags.
 - **Approval inbox**: drafts create pending approval requests that can be approved, rejected, edited, or delivered through another channel.
+- **Notification adapters**: stdout and command-based notifications support post, error, and approval-request events without hard-coding a private messaging provider.
 - **Feedback memory**: approval and rejection reasons are normalized into local feedback examples for future LLM drafting context and conservative auto-dismiss signals.
 - **Guardrail-first design**: posting is intended to fail closed when approval, rate limit, active-hour, opt-out, cooldown, or risk checks do not pass.
 - **Local durable state**: SQLite stores candidates, queues, audit events, opt-outs, and rate-limit counters.
@@ -98,6 +100,9 @@ When packaged or linked, the intended commands are:
 x-hermes doctor
 x-hermes status
 x-hermes setup
+x-hermes config show
+x-hermes campaigns list
+x-hermes run --once
 x-hermes scan --query "your topic lang:en -is:retweet"
 x-hermes-mcp
 ```
@@ -139,31 +144,55 @@ Non-interactive setup does not install dependencies or change auth state; it pri
 `x-hermes` stores non-secret configuration at:
 
 ```text
-~/.config/x-hermes/config.json
+~/.config/x-hermes/config.yaml
 ```
 
 Example:
 
-```json
-{
-  "xurlApp": "x-hermes",
-  "username": "your_handle",
-  "activeHours": {
-    "start": "09:00",
-    "end": "21:00",
-    "timezone": "America/New_York"
-  },
-  "maxRepliesPerDay": 120,
-  "replyTextDefault": "Configure this per project",
-  "postingEnabled": false,
-  "minimumFollowers": 1000,
-  "minimumAccountAgeDays": 300,
-  "perAuthorCooldownHours": 50,
-  "blockDuplicateReplyText": true,
-  "requireApprovalForKeywordSearch": true,
-  "requireOptInForAutoPost": true
-}
+```yaml
+xurlApp: x-hermes
+username: your_handle
+runtime:
+  mode: daemon
+  scanIntervalMinutes: 60
+  dryRun: true
+posting:
+  enabled: false
+  approvalMode: required
+  maxRepliesPerDay: 120
+  maxRepliesPerRun: 10
+  activeHours:
+    start: "09:00"
+    end: "21:00"
+    timezone: America/New_York
+  perAuthorCooldownHours: 50
+  blockDuplicateReplyText: true
+  requireOptInForAutoPost: true
+quality:
+  minimumFollowers: 1000
+  minimumAccountAgeDays: 300
+  skipSensitive: true
+  skipScamLanguage: true
+  useFeedbackSignals: true
+notifications:
+  onPost: true
+  onError: true
+  onApprovalRequest: true
+  channels:
+    - id: stdout
+      type: stdout
+      enabled: true
+campaigns:
+  - id: example
+    enabled: true
+    query: '"your topic" lang:en -is:retweet'
+    replyText: "Thanks for sharing."
+    fetchLimit: 25
+    postLimit: 5
+    approvalMode: required
 ```
+
+Legacy `~/.config/x-hermes/config.json` files are still read and can be migrated with `x-hermes config init`.
 
 X OAuth tokens and app credentials are managed by `xurl` under `~/.xurl`. Do not commit, print, upload, parse, or inspect that directory.
 
@@ -181,6 +210,17 @@ node apps/x-hermes-tool/dist/cli.js doctor
 x-hermes setup
 x-hermes setup --check-only
 x-hermes setup --with-hermes
+x-hermes config init
+x-hermes config show
+x-hermes config validate
+x-hermes config set posting.enabled true
+x-hermes campaigns add "example" --query "keyword lang:en -is:retweet" --reply-text "Thanks for sharing." --limit 5
+x-hermes campaigns list
+x-hermes campaigns run example
+x-hermes run
+x-hermes run --once --campaign example
+x-hermes service install
+x-hermes service status
 x-hermes status
 x-hermes doctor
 x-hermes watch-queries add "Name" --query "keyword lang:en -is:retweet"
@@ -205,7 +245,7 @@ x-hermes-mcp
 
 `doctor` never mutates state. `setup --check-only` runs setup checks without installs, auth changes, or config writes.
 
-Posting is disabled by default. To post, a candidate must have an approved draft and pass every guardrail, including `postingEnabled`, active hours, daily cap, author cooldown, opt-out state, duplicate text checks, unresolved risk flags, and opt-in evidence when required.
+Posting is disabled by default. To post, a candidate must have an approved draft and pass every guardrail, including `posting.enabled`, active hours, daily cap, author cooldown, opt-out state, duplicate text checks, unresolved risk flags, and opt-in evidence when required.
 
 ## MCP
 
@@ -250,6 +290,8 @@ edit_draft
 process_approval_response
 post_approved_reply
 record_opt_out
+list_campaigns
+run_campaigns_once
 get_stats
 get_feedback_profile
 ```

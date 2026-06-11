@@ -3,6 +3,8 @@ import type { AuthorRecord, CandidateRecord, CandidateScore } from "./types.js";
 export interface ScoringOptions {
   minimumFollowers?: number;
   minimumAccountAgeDays?: number;
+  skipSensitive?: boolean;
+  skipScamLanguage?: boolean;
   now?: Date;
   optedOut?: boolean;
 }
@@ -19,6 +21,8 @@ export function scoreCandidate(
 ): CandidateScore {
   const minimumFollowers = options.minimumFollowers ?? DEFAULT_MINIMUM_FOLLOWERS;
   const minimumAccountAgeDays = options.minimumAccountAgeDays ?? DEFAULT_MINIMUM_ACCOUNT_AGE_DAYS;
+  const skipSensitive = options.skipSensitive ?? true;
+  const skipScamLanguage = options.skipScamLanguage ?? true;
   const now = options.now ?? new Date();
   const riskFlags: string[] = [];
 
@@ -48,12 +52,12 @@ export function scoreCandidate(
     score -= 25;
   }
 
-  if (candidate.sensitive) {
+  if (skipSensitive && candidate.sensitive) {
     riskFlags.push("sensitive");
     score -= 50;
   }
 
-  if (SCAM_LANGUAGE.test(candidate.text)) {
+  if (skipScamLanguage && SCAM_LANGUAGE.test(candidate.text)) {
     riskFlags.push("scam_language");
     score -= 80;
   }

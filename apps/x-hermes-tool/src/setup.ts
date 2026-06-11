@@ -211,8 +211,8 @@ export async function runSetup(
     return await collectStatus({ withHermes: options.withHermes, mutateStorage: false, env });
   }
 
-  await saveConfig(nextConfig.config, env);
-  io.output.write(`Saved non-secret config to ${loaded.path}\n`);
+  const savedPath = await saveConfig(nextConfig.config, env);
+  io.output.write(`Saved non-secret config to ${savedPath}\n`);
 
   const whoami = await runXurl(["whoami"], { timeoutMs: 15_000, env });
   printProcessOutput(whoami.stdout, whoami.stderr, io);
@@ -241,14 +241,23 @@ export function printStatusReport(title: string, report: StatusReport, io: Promp
     io.output.write(`xurl app: ${report.config.xurlApp}\n`);
     io.output.write(`username: ${report.config.username || "(not set)"}\n`);
     io.output.write(
-      `active hours: ${report.config.activeHours.start}-${report.config.activeHours.end} ${report.config.activeHours.timezone}\n`
+      `runtime: ${report.config.runtime.mode}, every ${report.config.runtime.scanIntervalMinutes}m, dry-run ${String(report.config.runtime.dryRun)}\n`
     );
-    io.output.write(`posting enabled: ${String(report.config.postingEnabled)}\n`);
     io.output.write(
-      `account quality: >=${report.config.minimumFollowers} followers, >=${report.config.minimumAccountAgeDays} days old\n`
+      `active hours: ${report.config.posting.activeHours.start}-${report.config.posting.activeHours.end} ${report.config.posting.activeHours.timezone}\n`
     );
-    io.output.write(`author cooldown: ${report.config.perAuthorCooldownHours}h\n`);
-    io.output.write(`duplicate reply blocking: ${String(report.config.blockDuplicateReplyText)}\n`);
+    io.output.write(`posting enabled: ${String(report.config.posting.enabled)}\n`);
+    io.output.write(`approval mode: ${report.config.posting.approvalMode}\n`);
+    io.output.write(
+      `account quality: >=${report.config.quality.minimumFollowers} followers, >=${report.config.quality.minimumAccountAgeDays} days old\n`
+    );
+    io.output.write(`author cooldown: ${report.config.posting.perAuthorCooldownHours}h\n`);
+    io.output.write(
+      `duplicate reply blocking: ${String(report.config.posting.blockDuplicateReplyText)}\n`
+    );
+    io.output.write(
+      `campaigns: ${report.config.campaigns.filter((campaign) => campaign.enabled).length} enabled / ${report.config.campaigns.length} total\n`
+    );
   }
 
   io.output.write("\n");

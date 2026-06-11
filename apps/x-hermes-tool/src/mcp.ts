@@ -375,6 +375,26 @@ export async function handleMcpRequest(request: JsonRpcRequest): Promise<unknown
             }
           },
           {
+            name: "list_campaigns",
+            description: "List configured YAML campaigns.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {}
+            }
+          },
+          {
+            name: "run_campaigns_once",
+            description: "Run one configured campaign or all enabled campaigns once.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                campaignId: { type: "string" }
+              }
+            }
+          },
+          {
             name: "get_stats",
             description: "Get x-hermes queue and audit stats.",
             inputSchema: {
@@ -579,6 +599,22 @@ async function handleToolCall(params: Record<string, unknown>): Promise<unknown>
           reason: optionalString(args.reason)
         });
         return toolResult({ recorded: true, username: args.username });
+      }
+
+      case "list_campaigns": {
+        const { loadConfig } = await import("./config.js");
+        const loaded = await loadConfig();
+        return toolResult(loaded.config.campaigns);
+      }
+
+      case "run_campaigns_once": {
+        const { runCampaignsOnce } = await import("./campaigns.js");
+        return toolResult(
+          await runCampaignsOnce({
+            campaignId: optionalString(args.campaignId),
+            output: process.stderr
+          })
+        );
       }
 
       case "get_stats": {
