@@ -125,6 +125,70 @@ export interface ReplyDraftRecord {
   updatedAt: string;
 }
 
+export type ApprovalRequestStatus = "pending" | "approved" | "rejected" | "expired";
+export type ApprovalDeliveryStatus = "not_sent" | "sent" | "failed";
+export type ApprovalDecision = "approved" | "rejected";
+
+export interface ApprovalRequestRecord {
+  id: string;
+  tweetId: string;
+  draftId: string;
+  status: ApprovalRequestStatus;
+  requestedBy: string;
+  channel?: string;
+  recipient?: string;
+  externalMessageId?: string;
+  deliveryStatus: ApprovalDeliveryStatus;
+  messageText?: string;
+  expiresAt?: string;
+  decidedBy?: string;
+  decisionReason?: string;
+  decisionLabels: string[];
+  decidedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApprovalRequestDetails {
+  request: ApprovalRequestRecord;
+  candidate: StoredCandidateRecord;
+  draft: ReplyDraftRecord;
+}
+
+export interface FeedbackExampleRecord {
+  id: string;
+  approvalRequestId?: string;
+  tweetId: string;
+  draftId?: string;
+  decision: ApprovalDecision;
+  reason?: string;
+  labels: string[];
+  candidateText: string;
+  draftText?: string;
+  sourceQuery?: string;
+  authorUsername: string;
+  createdAt: string;
+}
+
+export interface FeedbackProfile {
+  totals: {
+    approved: number;
+    rejected: number;
+  };
+  labels: Record<string, number>;
+  queryStats: Array<{
+    sourceQuery: string;
+    approved: number;
+    rejected: number;
+    approvalRate: number;
+  }>;
+  examples: {
+    approved: FeedbackExampleRecord[];
+    rejected: FeedbackExampleRecord[];
+  };
+  draftingGuidance: string[];
+}
+
 export interface AuditEventRecord {
   id: string;
   eventType: string;
@@ -144,6 +208,8 @@ export interface CandidateScore {
 export interface XHermesStats {
   candidatesByStatus: Record<CandidateStatus, number>;
   replyDrafts: number;
+  approvalRequests: Record<ApprovalRequestStatus, number>;
+  feedbackExamples: number;
   postedReplies: number;
   optOuts: number;
   auditEvents: number;

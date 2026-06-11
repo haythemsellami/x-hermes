@@ -238,6 +238,116 @@ export async function handleMcpRequest(request: JsonRpcRequest): Promise<unknown
             }
           },
           {
+            name: "list_approval_requests",
+            description: "List approval inbox requests for human review.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                status: { type: "string" },
+                limit: { type: "number" }
+              }
+            }
+          },
+          {
+            name: "get_approval_request",
+            description: "Get one approval request with candidate and draft details.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id"],
+              properties: {
+                id: { type: "string" }
+              }
+            }
+          },
+          {
+            name: "render_approval_request",
+            description: "Render a channel-neutral approval message for a human.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id"],
+              properties: {
+                id: { type: "string" }
+              }
+            }
+          },
+          {
+            name: "record_approval_delivery",
+            description: "Record that an approval request was sent by a messaging gateway.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id", "deliveryStatus"],
+              properties: {
+                id: { type: "string" },
+                deliveryStatus: { type: "string" },
+                channel: { type: "string" },
+                recipient: { type: "string" },
+                externalMessageId: { type: "string" },
+                actor: { type: "string" }
+              }
+            }
+          },
+          {
+            name: "approve_request",
+            description: "Approve a pending approval request and store feedback.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id", "approvedBy"],
+              properties: {
+                id: { type: "string" },
+                approvedBy: { type: "string" },
+                reason: { type: "string" }
+              }
+            }
+          },
+          {
+            name: "reject_request",
+            description: "Reject a pending approval request and store feedback.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id", "rejectedBy"],
+              properties: {
+                id: { type: "string" },
+                rejectedBy: { type: "string" },
+                reason: { type: "string" }
+              }
+            }
+          },
+          {
+            name: "edit_draft",
+            description: "Edit the draft attached to a pending approval request.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id", "text"],
+              properties: {
+                id: { type: "string" },
+                text: { type: "string" },
+                editedBy: { type: "string" }
+              }
+            }
+          },
+          {
+            name: "process_approval_response",
+            description: "Parse and apply a human response such as approve: reason, reject: reason, or edit: text.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id", "message", "actor"],
+              properties: {
+                id: { type: "string" },
+                message: { type: "string" },
+                actor: { type: "string" },
+                channel: { type: "string" }
+              }
+            }
+          },
+          {
             name: "post_approved_reply",
             description: "Post an approved reply only when all guardrails pass.",
             inputSchema: {
@@ -271,6 +381,17 @@ export async function handleMcpRequest(request: JsonRpcRequest): Promise<unknown
               type: "object",
               additionalProperties: false,
               properties: {}
+            }
+          },
+          {
+            name: "get_feedback_profile",
+            description: "Get approval/rejection feedback examples and drafting guidance for an LLM.",
+            inputSchema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                limit: { type: "number" }
+              }
             }
           }
         ]
@@ -353,6 +474,94 @@ async function handleToolCall(params: Record<string, unknown>): Promise<unknown>
         return toolResult({ rejected: true, tweetId: args.tweetId });
       }
 
+      case "list_approval_requests": {
+        const { listApprovalRequests } = await import("./approvals.js");
+        return toolResult(
+          await listApprovalRequests({
+            status: optionalString(args.status) as
+              | "pending"
+              | "approved"
+              | "rejected"
+              | "expired"
+              | undefined,
+            limit: optionalNumber(args.limit) ?? 50
+          })
+        );
+      }
+
+      case "get_approval_request": {
+        const { getApprovalRequestDetails } = await import("./approvals.js");
+        return toolResult(await getApprovalRequestDetails({ id: requiredString(args.id, "id") }));
+      }
+
+      case "render_approval_request": {
+        const { getApprovalRequestDetails, renderApprovalRequestMessage } = await import("./approvals.js");
+        const details = await getApprovalRequestDetails({ id: requiredString(args.id, "id") });
+        return toolResult({
+          request: details.request,
+          message: details.request.messageText ?? renderApprovalRequestMessage(details)
+        });
+      }
+
+      case "record_approval_delivery": {
+        const { recordApprovalDelivery } = await import("./approvals.js");
+        return toolResult(
+          await recordApprovalDelivery({
+            id: requiredString(args.id, "id"),
+            deliveryStatus: requiredString(args.deliveryStatus, "deliveryStatus") as "sent" | "failed",
+            channel: optionalString(args.channel),
+            recipient: optionalString(args.recipient),
+            externalMessageId: optionalString(args.externalMessageId),
+            actor: optionalString(args.actor) ?? "hermes"
+          })
+        );
+      }
+
+      case "approve_request": {
+        const { approveApprovalRequest } = await import("./approvals.js");
+        return toolResult(
+          await approveApprovalRequest({
+            id: requiredString(args.id, "id"),
+            approvedBy: requiredString(args.approvedBy, "approvedBy"),
+            reason: optionalString(args.reason)
+          })
+        );
+      }
+
+      case "reject_request": {
+        const { rejectApprovalRequest } = await import("./approvals.js");
+        return toolResult(
+          await rejectApprovalRequest({
+            id: requiredString(args.id, "id"),
+            rejectedBy: requiredString(args.rejectedBy, "rejectedBy"),
+            reason: optionalString(args.reason)
+          })
+        );
+      }
+
+      case "edit_draft": {
+        const { editApprovalRequestDraft } = await import("./approvals.js");
+        return toolResult(
+          await editApprovalRequestDraft({
+            id: requiredString(args.id, "id"),
+            text: requiredString(args.text, "text"),
+            editedBy: optionalString(args.editedBy) ?? "hermes"
+          })
+        );
+      }
+
+      case "process_approval_response": {
+        const { processApprovalResponse } = await import("./approvals.js");
+        return toolResult(
+          await processApprovalResponse({
+            id: requiredString(args.id, "id"),
+            message: requiredString(args.message, "message"),
+            actor: requiredString(args.actor, "actor"),
+            channel: optionalString(args.channel)
+          })
+        );
+      }
+
       case "post_approved_reply": {
         const { postApprovedReply } = await import("./posting.js");
         const result = await postApprovedReply({
@@ -377,6 +586,17 @@ async function handleToolCall(params: Record<string, unknown>): Promise<unknown>
         const db = await openXHermesDatabase();
         try {
           return toolResult(db.getStats());
+        } finally {
+          db.close();
+        }
+      }
+
+      case "get_feedback_profile": {
+        const { getFeedbackProfile } = await import("./feedback.js");
+        const { openXHermesDatabase } = await import("./db.js");
+        const db = await openXHermesDatabase();
+        try {
+          return toolResult(getFeedbackProfile(db, optionalNumber(args.limit) ?? 100));
         } finally {
           db.close();
         }

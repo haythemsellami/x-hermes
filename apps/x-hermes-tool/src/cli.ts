@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { collectStatus, printStatusReport, runSetup } from "./setup.js";
-import type { CandidateStatus, SetupOptions } from "./types.js";
+import type { ApprovalRequestStatus, CandidateStatus, SetupOptions } from "./types.js";
 
 const VERSION = "0.1.0";
 
@@ -14,13 +14,13 @@ interface ParsedArgs {
 async function main(argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
 
-  if (hasFlag(parsed, "--help") || parsed.command === "help") {
-    printHelp();
+  if (hasFlag(parsed, "--version") || parsed.command === "version") {
+    process.stdout.write(`${VERSION}\n`);
     return 0;
   }
 
-  if (hasFlag(parsed, "--version") || parsed.command === "version") {
-    process.stdout.write(`${VERSION}\n`);
+  if (hasFlag(parsed, "--help") || parsed.command === "help") {
+    printHelp();
     return 0;
   }
 
@@ -95,6 +95,12 @@ async function main(argv: string[]): Promise<number> {
     case "reject":
       return await runRejectCommand(parsed);
 
+    case "approvals":
+      return await runApprovalsCommand(parsed);
+
+    case "feedback":
+      return await runFeedbackCommand(parsed);
+
     case "opt-out":
       return await runOptOutCommand(parsed);
 
@@ -160,6 +166,16 @@ Usage:
   x-hermes draft <tweet-id> --text <reply> [--by <actor>]
   x-hermes approve <tweet-id> --by <actor> [--reason <reason>]
   x-hermes reject <tweet-id> [--by <actor>] [--reason <reason>]
+  x-hermes approvals list [--status pending] [--limit 50] [--json]
+  x-hermes approvals show <request-id> [--json]
+  x-hermes approvals message <request-id>
+  x-hermes approvals approve <request-id> [--by <actor>] [--reason <reason>]
+  x-hermes approvals reject <request-id> [--by <actor>] [--reason <reason>]
+  x-hermes approvals edit <request-id> --text <reply> [--by <actor>]
+  x-hermes approvals respond <request-id> --message <message> [--by <actor>] [--json]
+  x-hermes approvals deliver <request-id> --status sent [--channel <name>] [--recipient <id>] [--external-id <id>]
+  x-hermes feedback profile [--json]
+  x-hermes feedback examples [--decision approved|rejected] [--limit 50] [--json]
   x-hermes post-approved <tweet-id> [--by <actor>] [--json]
   x-hermes opt-out add <username> [--by <actor>] [--reason <reason>]
   x-hermes stats [--json]
@@ -332,6 +348,215 @@ async function runRejectCommand(parsed: ParsedArgs): Promise<number> {
   return 0;
 }
 
+async function runApprovalsCommand(parsed: ParsedArgs): Promise<number> {
+  const {
+    approveApprovalRequest,
+    editApprovalRequestDraft,
+    getApprovalRequestDetails,
+    listApprovalRequests,
+    processApprovalResponse,
+    recordApprovalDelivery,
+    rejectApprovalRequest,
+    renderApprovalRequestMessage
+  } = await import("./approvals.js");
+
+  switch (parsed.subcommand) {
+    case "list": {
+      const requests = await listApprovalRequests({
+        status: getStringFlag(parsed, "--status") as ApprovalRequestStatus | undefined,
+        limit: getNumberFlag(parsed, "--limit", 50)
+      });
+      if (hasFlag(parsed, "--json")) {
+        process.stdout.write(`${JSON.stringify(requests, null, 2)}\n`);
+        return 0;
+      }
+      if (requests.length === 0) {
+        process.stdout.write("No approval requests found.\n");
+        return 0;
+      }
+      for (const request of requests) {
+        process.stdout.write(
+          `${request.id}\t${request.status}\t${request.deliveryStatus}\t${request.tweetId}\t${request.draftId}\n`
+        );
+      }
+      return 0;
+    }
+
+    case "show": {
+      const id = parsed.positionals[0];
+      if (!id) {
+        process.stderr.write("Usage: x-hermes approvals show <request-id> [--json]\n");
+        return 2;
+      }
+      const details = await getApprovalRequestDetails({ id });
+      if (hasFlag(parsed, "--json")) {
+        process.stdout.write(`${JSON.stringify(details, null, 2)}\n`);
+      } else {
+        printApprovalDetails(details);
+      }
+      return 0;
+    }
+
+    case "message": {
+      const id = parsed.positionals[0];
+      if (!id) {
+        process.stderr.write("Usage: x-hermes approvals message <request-id>\n");
+        return 2;
+      }
+      const details = await getApprovalRequestDetails({ id });
+      process.stdout.write(`${details.request.messageText ?? renderApprovalRequestMessage(details)}\n`);
+      return 0;
+    }
+
+    case "deliver": {
+      const id = parsed.positionals[0];
+      const deliveryStatus = getStringFlag(parsed, "--status") as "sent" | "failed" | undefined;
+      if (!id || !deliveryStatus || !["sent", "failed"].includes(deliveryStatus)) {
+        process.stderr.write(
+          "Usage: x-hermes approvals deliver <request-id> --status sent|failed [--channel <name>] [--recipient <id>] [--external-id <id>]\n"
+        );
+        return 2;
+      }
+      const request = await recordApprovalDelivery({
+        id,
+        deliveryStatus,
+        channel: getStringFlag(parsed, "--channel"),
+        recipient: getStringFlag(parsed, "--recipient"),
+        externalMessageId: getStringFlag(parsed, "--external-id"),
+        actor: getStringFlag(parsed, "--by") ?? "cli"
+      });
+      process.stdout.write(`Recorded ${request.deliveryStatus} delivery for ${request.id}\n`);
+      return 0;
+    }
+
+    case "approve": {
+      const id = parsed.positionals[0];
+      if (!id) {
+        process.stderr.write("Usage: x-hermes approvals approve <request-id> [--by <actor>] [--reason <reason>]\n");
+        return 2;
+      }
+      const result = await approveApprovalRequest({
+        id,
+        approvedBy: getStringFlag(parsed, "--by") ?? "human",
+        reason: getStringFlag(parsed, "--reason")
+      });
+      process.stdout.write(`${result.message}\n`);
+      return 0;
+    }
+
+    case "reject": {
+      const id = parsed.positionals[0];
+      if (!id) {
+        process.stderr.write("Usage: x-hermes approvals reject <request-id> [--by <actor>] [--reason <reason>]\n");
+        return 2;
+      }
+      const result = await rejectApprovalRequest({
+        id,
+        rejectedBy: getStringFlag(parsed, "--by") ?? "human",
+        reason: getStringFlag(parsed, "--reason")
+      });
+      process.stdout.write(`${result.message}\n`);
+      return 0;
+    }
+
+    case "edit": {
+      const id = parsed.positionals[0];
+      const text = getStringFlag(parsed, "--text");
+      if (!id || !text) {
+        process.stderr.write("Usage: x-hermes approvals edit <request-id> --text <reply> [--by <actor>]\n");
+        return 2;
+      }
+      const result = await editApprovalRequestDraft({
+        id,
+        text,
+        editedBy: getStringFlag(parsed, "--by") ?? "human"
+      });
+      process.stdout.write(`Updated draft ${result.draft.id} for approval request ${result.request.id}\n`);
+      return 0;
+    }
+
+    case "respond": {
+      const id = parsed.positionals[0];
+      const message = getStringFlag(parsed, "--message");
+      if (!id || !message) {
+        process.stderr.write(
+          "Usage: x-hermes approvals respond <request-id> --message <message> [--by <actor>] [--json]\n"
+        );
+        return 2;
+      }
+      const result = await processApprovalResponse({
+        id,
+        message,
+        actor: getStringFlag(parsed, "--by") ?? "human",
+        channel: getStringFlag(parsed, "--channel")
+      });
+      if (hasFlag(parsed, "--json")) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+      } else {
+        process.stdout.write(`${result.message}\n`);
+      }
+      return 0;
+    }
+
+    default:
+      process.stderr.write("Usage: x-hermes approvals <list|show|message|deliver|approve|reject|edit|respond>\n");
+      return 2;
+  }
+}
+
+async function runFeedbackCommand(parsed: ParsedArgs): Promise<number> {
+  const { getFeedbackProfile } = await import("./feedback.js");
+  const { openXHermesDatabase } = await import("./db.js");
+  const db = await openXHermesDatabase();
+  try {
+    switch (parsed.subcommand) {
+      case "profile": {
+        const profile = getFeedbackProfile(db, getNumberFlag(parsed, "--limit", 100));
+        if (hasFlag(parsed, "--json")) {
+          process.stdout.write(`${JSON.stringify(profile, null, 2)}\n`);
+          return 0;
+        }
+        process.stdout.write(`Approved examples: ${profile.totals.approved}\n`);
+        process.stdout.write(`Rejected examples: ${profile.totals.rejected}\n`);
+        process.stdout.write("Guidance:\n");
+        for (const line of profile.draftingGuidance) {
+          process.stdout.write(`  ${line}\n`);
+        }
+        if (Object.keys(profile.labels).length > 0) {
+          process.stdout.write("Labels:\n");
+          for (const [label, count] of Object.entries(profile.labels)) {
+            process.stdout.write(`  ${label}: ${count}\n`);
+          }
+        }
+        return 0;
+      }
+
+      case "examples": {
+        const examples = db.listFeedbackExamples({
+          decision: getStringFlag(parsed, "--decision") as "approved" | "rejected" | undefined,
+          limit: getNumberFlag(parsed, "--limit", 50)
+        });
+        if (hasFlag(parsed, "--json")) {
+          process.stdout.write(`${JSON.stringify(examples, null, 2)}\n`);
+          return 0;
+        }
+        for (const example of examples) {
+          process.stdout.write(
+            `${example.id}\t${example.decision}\t@${example.authorUsername}\t${example.labels.join(",")}\t${truncate(example.candidateText, 100)}\n`
+          );
+        }
+        return 0;
+      }
+
+      default:
+        process.stderr.write("Usage: x-hermes feedback <profile|examples>\n");
+        return 2;
+    }
+  } finally {
+    db.close();
+  }
+}
+
 async function runOptOutCommand(parsed: ParsedArgs): Promise<number> {
   if (parsed.subcommand !== "add") {
     process.stderr.write("Usage: x-hermes opt-out add <username> [--by <actor>] [--reason <reason>]\n");
@@ -448,6 +673,49 @@ function printCandidateDetails(details: {
     process.stdout.write(`\nDraft ${details.draft.id} (${details.draft.status}):\n`);
     process.stdout.write(`${details.draft.text}\n`);
   }
+}
+
+function printApprovalDetails(details: {
+  request: {
+    id: string;
+    status: string;
+    deliveryStatus: string;
+    channel?: string;
+    recipient?: string;
+    decisionReason?: string;
+    decisionLabels: string[];
+  };
+  candidate: {
+    tweetId: string;
+    status: string;
+    score: number;
+    authorUsername: string;
+    text: string;
+    riskFlags: string[];
+    url?: string;
+  };
+  draft: { id: string; status: string; text: string };
+}): void {
+  process.stdout.write(`Approval: ${details.request.id}\n`);
+  process.stdout.write(`Status: ${details.request.status}\n`);
+  process.stdout.write(`Delivery: ${details.request.deliveryStatus}\n`);
+  if (details.request.channel) {
+    process.stdout.write(`Channel: ${details.request.channel}\n`);
+  }
+  if (details.request.recipient) {
+    process.stdout.write(`Recipient: ${details.request.recipient}\n`);
+  }
+  if (details.request.decisionReason) {
+    process.stdout.write(`Reason: ${details.request.decisionReason}\n`);
+  }
+  if (details.request.decisionLabels.length > 0) {
+    process.stdout.write(`Feedback labels: ${details.request.decisionLabels.join(", ")}\n`);
+  }
+  process.stdout.write("\n");
+  printCandidateDetails({
+    candidate: details.candidate,
+    draft: details.draft
+  });
 }
 
 function truncate(value: string, maxLength: number): string {

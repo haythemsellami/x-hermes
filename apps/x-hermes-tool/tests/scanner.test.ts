@@ -86,6 +86,53 @@ describe("scanner", () => {
       db.close();
     }
   });
+
+  it("uses repeated rejection feedback to skip future candidates for the same author", async () => {
+    const fixture = await createFixture(searchFixture());
+    const db = await openXHermesDatabase({ path: path.join(fixture.root, "test.sqlite") });
+
+    try {
+      db.upsertAuthor({ authorId: "u1", username: "alice" });
+      db.upsertCandidate({
+        tweetId: "old-1",
+        authorId: "u1",
+        authorUsername: "alice",
+        text: "old",
+        status: "rejected",
+        score: 0,
+        riskFlags: [],
+        sensitive: false
+      });
+      db.recordFeedbackExample({
+        tweetId: "old-1",
+        decision: "rejected",
+        reason: "low relevance",
+        labels: ["rejected", "low_relevance"],
+        candidateText: "old",
+        authorUsername: "alice"
+      });
+      db.recordFeedbackExample({
+        tweetId: "old-1",
+        decision: "rejected",
+        reason: "wrong audience",
+        labels: ["rejected", "wrong_audience"],
+        candidateText: "old again",
+        authorUsername: "alice"
+      });
+
+      await scanRecentPosts({
+        query: "monad lang:en -is:retweet",
+        limit: 25,
+        env: fixture.env,
+        db
+      });
+
+      expect(db.getCandidate("t1")?.status).toBe("skipped");
+      expect(db.getCandidate("t1")?.riskFlags).toContain("feedback_rejected_author");
+    } finally {
+      db.close();
+    }
+  });
 });
 
 function searchFixture(): unknown {

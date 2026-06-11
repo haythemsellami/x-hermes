@@ -41,7 +41,8 @@ Official X API
 - **Hermes integration**: MCP server support gives Hermes a structured interface instead of generic shell access.
 - **Search ingestion**: watch queries and direct scans store candidates and authors locally.
 - **Deterministic scoring**: candidate scoring runs before Hermes judgment and records risk flags.
-- **Approval queue**: drafts, approvals, rejections, opt-outs, and audit events are stored locally.
+- **Approval inbox**: drafts create pending approval requests that can be approved, rejected, edited, or delivered through another channel.
+- **Feedback memory**: approval and rejection reasons are normalized into local feedback examples for future LLM drafting context and conservative auto-dismiss signals.
 - **Guardrail-first design**: posting is intended to fail closed when approval, rate limit, active-hour, opt-out, cooldown, or risk checks do not pass.
 - **Local durable state**: SQLite stores candidates, queues, audit events, opt-outs, and rate-limit counters.
 
@@ -188,6 +189,10 @@ x-hermes candidates show <tweet-id>
 x-hermes draft <tweet-id> --text "Your reply text" --by <actor>
 x-hermes approve <tweet-id> --by <actor> --reason "Reviewed"
 x-hermes reject <tweet-id> --by <actor> --reason "Low relevance"
+x-hermes approvals list --status pending
+x-hermes approvals show <approval-request-id>
+x-hermes approvals respond <approval-request-id> --message "approve: looks good" --by <actor>
+x-hermes feedback profile
 x-hermes post-approved <tweet-id> --by <actor>
 x-hermes opt-out add @username --by <actor> --reason "Requested"
 x-hermes stats
@@ -232,9 +237,18 @@ get_candidate
 queue_reply_draft
 approve_candidate
 reject_candidate
+list_approval_requests
+get_approval_request
+render_approval_request
+record_approval_delivery
+approve_request
+reject_request
+edit_draft
+process_approval_response
 post_approved_reply
 record_opt_out
 get_stats
+get_feedback_profile
 ```
 
 ## Security Model

@@ -109,13 +109,51 @@ Queue a reply draft:
 x-hermes draft <tweet-id> --text "Thanks for asking." --by hermes
 ```
 
+Queueing a draft also creates an approval request. Review pending requests:
+
+```bash
+x-hermes approvals list --status pending
+x-hermes approvals show <approval-request-id>
+x-hermes approvals message <approval-request-id>
+```
+
 Approve after review:
 
 ```bash
 x-hermes approve <tweet-id> --by <human> --reason "Reviewed manually"
 ```
 
+Or approve/reject the request directly:
+
+```bash
+x-hermes approvals approve <approval-request-id> --by <human> --reason "Specific and useful"
+x-hermes approvals reject <approval-request-id> --by <human> --reason "low relevance"
+```
+
+Edit a pending draft before deciding:
+
+```bash
+x-hermes approvals edit <approval-request-id> --text "Updated reply text" --by <human>
+```
+
+Messaging gateways can use the same state machine by rendering the request,
+delivering it through any channel, and applying the human response:
+
+```bash
+x-hermes approvals deliver <approval-request-id> --status sent --channel telegram --recipient <user-id> --external-id <message-id>
+x-hermes approvals respond <approval-request-id> --message "approve: looks good" --by <human>
+x-hermes approvals respond <approval-request-id> --message "reject: too generic" --by <human>
+x-hermes approvals respond <approval-request-id> --message "edit: Better reply text" --by <human>
+```
+
 Approval does not post. It only marks the candidate and latest draft as approved.
+Approval and rejection reasons are stored as feedback examples. Use them as LLM
+drafting context:
+
+```bash
+x-hermes feedback profile
+x-hermes feedback examples --decision rejected
+```
 
 ## 7. Guarded Posting
 
@@ -186,9 +224,18 @@ get_candidate
 queue_reply_draft
 approve_candidate
 reject_candidate
+list_approval_requests
+get_approval_request
+render_approval_request
+record_approval_delivery
+approve_request
+reject_request
+edit_draft
+process_approval_response
 post_approved_reply
 record_opt_out
 get_stats
+get_feedback_profile
 ```
 
 MCP posting is hard-gated. `post_approved_reply` returns an error result when guardrails block posting.
@@ -202,4 +249,3 @@ pnpm build
 ```
 
 Tests use fake `xurl` binaries and temp config/data directories. They do not require live X credentials.
-

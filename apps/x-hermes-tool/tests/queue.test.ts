@@ -32,6 +32,8 @@ describe("queue", () => {
       });
       expect(draft.status).toBe("approval_pending");
       expect(db.getCandidate("tweet-1")?.status).toBe("approval_pending");
+      const request = db.getLatestPendingApprovalRequestForCandidate("tweet-1");
+      expect(request?.draftId).toBe(draft.id);
 
       const approved = await approveCandidate({
         tweetId: "tweet-1",
@@ -41,7 +43,9 @@ describe("queue", () => {
       });
       expect(approved.status).toBe("approved");
       expect(db.getCandidate("tweet-1")?.status).toBe("approved");
-      expect(db.listAuditEvents()).toHaveLength(2);
+      expect(db.getApprovalRequest(request?.id ?? "")?.status).toBe("approved");
+      expect(db.getFeedbackProfile().totals.approved).toBe(1);
+      expect(db.listAuditEvents()).toHaveLength(3);
     } finally {
       db.close();
     }
@@ -74,6 +78,7 @@ describe("queue", () => {
         db
       });
       expect(db.getCandidate("tweet-1")?.status).toBe("rejected");
+      expect(db.getFeedbackProfile().totals.rejected).toBe(1);
 
       await recordOptOut({
         username: "@Alice",
@@ -114,4 +119,3 @@ async function tempDir(): Promise<string> {
   tempDirs.push(dir);
   return dir;
 }
-

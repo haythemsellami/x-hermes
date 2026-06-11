@@ -17,7 +17,7 @@ describe("database", () => {
   it("creates the spec schema and reports the current version", async () => {
     const db = await openTestDb();
     try {
-      expect(db.schemaVersion()).toBe(1);
+      expect(db.schemaVersion()).toBe(2);
       expect(db.listWatchQueries()).toEqual([]);
       expect(db.listCandidates()).toEqual([]);
     } finally {
@@ -103,8 +103,44 @@ describe("database", () => {
       expect(db.getLatestDraftForCandidate("tweet-1")?.id).toBe(draft.id);
       expect(db.getCandidate("tweet-1")?.status).toBe("approval_pending");
 
+      const request = db.createApprovalRequest({
+        tweetId: "tweet-1",
+        draftId: draft.id,
+        requestedBy: "test"
+      });
+      expect(request.status).toBe("pending");
+      expect(db.listApprovalRequests({ status: "pending" })).toHaveLength(1);
+      db.updateApprovalDelivery({
+        id: request.id,
+        channel: "telegram",
+        recipient: "user-1",
+        externalMessageId: "msg-1",
+        deliveryStatus: "sent"
+      });
+      expect(db.getApprovalRequest(request.id)?.deliveryStatus).toBe("sent");
+
       db.updateDraftStatus(draft.id, "approved");
       expect(db.getReplyDraft(draft.id)?.status).toBe("approved");
+      db.decideApprovalRequest({
+        id: request.id,
+        status: "approved",
+        decidedBy: "human",
+        reason: "looks good",
+        labels: ["approved", "good_fit"]
+      });
+      db.recordFeedbackExample({
+        approvalRequestId: request.id,
+        tweetId: "tweet-1",
+        draftId: draft.id,
+        decision: "approved",
+        reason: "looks good",
+        labels: ["approved", "good_fit"],
+        candidateText: "hello monad",
+        draftText: "Thanks for asking.",
+        sourceQuery: "monad",
+        authorUsername: "alice"
+      });
+      expect(db.getFeedbackProfile().totals.approved).toBe(1);
 
       db.addOptOut({ username: "@Alice", authorId: "user-1", reason: "manual request" });
       expect(db.isOptedOut("alice")).toBe(true);

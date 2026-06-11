@@ -1,4 +1,5 @@
 import { openXHermesDatabase, type XHermesDatabase } from "./db.js";
+import { feedbackSignalsForCandidate } from "./feedback.js";
 import { scoreCandidate } from "./scoring.js";
 import { buildRecentSearchPath } from "./xapi.js";
 import { runXurl } from "./xurl.js";
@@ -112,9 +113,10 @@ export async function scanRecentPosts(options: ScanOptions): Promise<ScanSummary
           const scoring = scoreCandidate(item.candidate, item.author, {
             optedOut: db.isOptedOut(item.author.username)
           });
-          item.candidate.score = scoring.score;
-          item.candidate.riskFlags = scoring.riskFlags;
-          item.candidate.status = scoring.accepted ? "found" : "skipped";
+          const feedback = feedbackSignalsForCandidate(db, item.candidate);
+          item.candidate.score = scoring.score + feedback.scoreDelta;
+          item.candidate.riskFlags = [...scoring.riskFlags, ...feedback.riskFlags];
+          item.candidate.status = scoring.accepted && !feedback.skip ? "found" : "skipped";
           db.upsertAuthor(item.author);
           if (!db.getCandidate(item.candidate.tweetId)) {
             newCandidates += 1;

@@ -5,17 +5,23 @@ import { DatabaseSync } from "node:sqlite";
 
 import { getDataDir } from "./config.js";
 import type {
+  ApprovalDeliveryStatus,
+  ApprovalDecision,
+  ApprovalRequestRecord,
+  ApprovalRequestStatus,
   AuditEventRecord,
   AuthorRecord,
   CandidateRecord,
   CandidateStatus,
+  FeedbackExampleRecord,
+  FeedbackProfile,
   ReplyDraftRecord,
   StoredCandidateRecord,
   WatchQueryRecord,
   XHermesStats
 } from "./types.js";
 
-const CURRENT_SCHEMA_VERSION = 1;
+const CURRENT_SCHEMA_VERSION = 2;
 
 export interface DatabaseOptions {
   path?: string;
@@ -92,6 +98,41 @@ interface ReplyDraftRow {
   updated_at: string;
 }
 
+interface ApprovalRequestRow {
+  id: string;
+  tweet_id: string;
+  draft_id: string;
+  status: ApprovalRequestStatus;
+  requested_by: string;
+  channel: string | null;
+  recipient: string | null;
+  external_message_id: string | null;
+  delivery_status: ApprovalDeliveryStatus;
+  message_text: string | null;
+  expires_at: string | null;
+  decided_by: string | null;
+  decision_reason: string | null;
+  decision_labels_json: string;
+  decided_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface FeedbackExampleRow {
+  id: string;
+  approval_request_id: string | null;
+  tweet_id: string;
+  draft_id: string | null;
+  decision: ApprovalDecision;
+  reason: string | null;
+  labels_json: string;
+  candidate_text: string;
+  draft_text: string | null;
+  source_query: string | null;
+  author_username: string;
+  created_at: string;
+}
+
 interface AuditEventRow {
   id: string;
   event_type: string;
@@ -140,14 +181,22 @@ export class XHermesDatabase {
     if (version === CURRENT_SCHEMA_VERSION) {
       return;
     }
-    if (version !== 0) {
-      throw new Error(`Unsupported database schema version ${version}.`);
-    }
 
     this.db.exec("BEGIN");
     try {
-      this.db.exec(SCHEMA_SQL);
-      this.db.exec(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION}`);
+      if (version === 0) {
+        this.db.exec(SCHEMA_SQL);
+        this.db.exec("PRAGMA user_version = 1");
+      } else if (version !== 1) {
+        throw new Error(`Unsupported database schema version ${version}.`);
+      }
+
+      const nextVersion = (this.db.prepare("PRAGMA user_version").get() as { user_version: number })
+        .user_version;
+      if (nextVersion === 1) {
+        this.db.exec(SCHEMA_V2_SQL);
+        this.db.exec("PRAGMA user_version = 2");
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -435,6 +484,327 @@ export class XHermesDatabase {
       .run(status, nowIso(), id);
   }
 
+  updateDraftText(id: string, text: string, status?: ReplyDraftRecord["status"]): ReplyDraftRecord {
+    const timestamp = nowIso();
+    if (status) {
+      this.db
+        .prepare("UPDATE reply_drafts SET text = ?, status = ?, updated_at = ? WHERE id = ?")
+        .run(text, status, timestamp, id);
+    } else {
+      this.db
+        .prepare("UPDATE reply_drafts SET text = ?, updated_at = ? WHERE id = ?")
+        .run(text, timestamp, id);
+    }
+    const saved = this.getReplyDraft(id);
+    if (!saved) {
+      throw new Error(`Draft not found after update: ${id}`);
+    }
+    return saved;
+  }
+
+  createApprovalRequest(input: {
+    tweetId: string;
+    draftId: string;
+    requestedBy: string;
+    channel?: string;
+    recipient?: string;
+    messageText?: string;
+    expiresAt?: string;
+  }): ApprovalRequestRecord {
+    const id = randomUUID();
+    const timestamp = nowIso();
+    this.db
+      .prepare(
+        `INSERT INTO approval_requests
+           (id, tweet_id, draft_id, status, requested_by, channel, recipient,
+            delivery_status, message_text, expires_at, decision_labels_json,
+            created_at, updated_at)
+         VALUES (?, ?, ?, 'pending', ?, ?, ?, 'not_sent', ?, ?, '[]', ?, ?)`
+      )
+      .run(
+        id,
+        input.tweetId,
+        input.draftId,
+        input.requestedBy,
+        input.channel ?? null,
+        input.recipient ?? null,
+        input.messageText ?? null,
+        input.expiresAt ?? null,
+        timestamp,
+        timestamp
+      );
+    const saved = this.getApprovalRequest(id);
+    if (!saved) {
+      throw new Error(`Failed to save approval request ${id}.`);
+    }
+    return saved;
+  }
+
+  getApprovalRequest(id: string): ApprovalRequestRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM approval_requests WHERE id = ?").get(id) as
+      | ApprovalRequestRow
+      | undefined;
+    return row ? mapApprovalRequestRow(row) : undefined;
+  }
+
+  getLatestApprovalRequestForDraft(draftId: string): ApprovalRequestRecord | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM approval_requests WHERE draft_id = ? ORDER BY created_at DESC LIMIT 1")
+      .get(draftId) as ApprovalRequestRow | undefined;
+    return row ? mapApprovalRequestRow(row) : undefined;
+  }
+
+  getLatestPendingApprovalRequestForCandidate(tweetId: string): ApprovalRequestRecord | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM approval_requests
+         WHERE tweet_id = ? AND status = 'pending'
+         ORDER BY created_at DESC
+         LIMIT 1`
+      )
+      .get(tweetId) as ApprovalRequestRow | undefined;
+    return row ? mapApprovalRequestRow(row) : undefined;
+  }
+
+  listApprovalRequests(options: {
+    status?: ApprovalRequestStatus;
+    limit?: number;
+  } = {}): ApprovalRequestRecord[] {
+    const limit = clampLimit(options.limit ?? 50, 1, 500);
+    const rows = options.status
+      ? (this.db
+          .prepare(
+            `SELECT * FROM approval_requests
+             WHERE status = ?
+             ORDER BY created_at DESC
+             LIMIT ?`
+          )
+          .all(options.status, limit) as unknown as ApprovalRequestRow[])
+      : (this.db
+          .prepare(
+            `SELECT * FROM approval_requests
+             ORDER BY created_at DESC
+             LIMIT ?`
+          )
+          .all(limit) as unknown as ApprovalRequestRow[]);
+    return rows.map(mapApprovalRequestRow);
+  }
+
+  updateApprovalRequestMessage(id: string, messageText: string): ApprovalRequestRecord {
+    this.db
+      .prepare("UPDATE approval_requests SET message_text = ?, updated_at = ? WHERE id = ?")
+      .run(messageText, nowIso(), id);
+    return this.requireApprovalRequest(id);
+  }
+
+  updateApprovalDelivery(input: {
+    id: string;
+    channel?: string;
+    recipient?: string;
+    externalMessageId?: string;
+    deliveryStatus: ApprovalDeliveryStatus;
+  }): ApprovalRequestRecord {
+    this.db
+      .prepare(
+        `UPDATE approval_requests
+         SET channel = COALESCE(?, channel),
+             recipient = COALESCE(?, recipient),
+             external_message_id = COALESCE(?, external_message_id),
+             delivery_status = ?,
+             updated_at = ?
+         WHERE id = ?`
+      )
+      .run(
+        input.channel ?? null,
+        input.recipient ?? null,
+        input.externalMessageId ?? null,
+        input.deliveryStatus,
+        nowIso(),
+        input.id
+      );
+    return this.requireApprovalRequest(input.id);
+  }
+
+  decideApprovalRequest(input: {
+    id: string;
+    status: Extract<ApprovalRequestStatus, "approved" | "rejected">;
+    decidedBy: string;
+    reason?: string;
+    labels?: string[];
+  }): ApprovalRequestRecord {
+    const timestamp = nowIso();
+    this.db
+      .prepare(
+        `UPDATE approval_requests
+         SET status = ?,
+             decided_by = ?,
+             decision_reason = ?,
+             decision_labels_json = ?,
+             decided_at = ?,
+             updated_at = ?
+         WHERE id = ?`
+      )
+      .run(
+        input.status,
+        input.decidedBy,
+        input.reason ?? null,
+        stringifyJson(input.labels ?? []),
+        timestamp,
+        timestamp,
+        input.id
+      );
+    return this.requireApprovalRequest(input.id);
+  }
+
+  recordFeedbackExample(input: {
+    approvalRequestId?: string;
+    tweetId: string;
+    draftId?: string;
+    decision: ApprovalDecision;
+    reason?: string;
+    labels?: string[];
+    candidateText: string;
+    draftText?: string;
+    sourceQuery?: string;
+    authorUsername: string;
+  }): FeedbackExampleRecord {
+    const id = randomUUID();
+    const timestamp = nowIso();
+    this.db
+      .prepare(
+        `INSERT INTO feedback_examples
+           (id, approval_request_id, tweet_id, draft_id, decision, reason, labels_json,
+            candidate_text, draft_text, source_query, author_username, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        id,
+        input.approvalRequestId ?? null,
+        input.tweetId,
+        input.draftId ?? null,
+        input.decision,
+        input.reason ?? null,
+        stringifyJson(input.labels ?? []),
+        input.candidateText,
+        input.draftText ?? null,
+        input.sourceQuery ?? null,
+        normalizeUsername(input.authorUsername),
+        timestamp
+      );
+    const saved = this.getFeedbackExample(id);
+    if (!saved) {
+      throw new Error(`Failed to save feedback example ${id}.`);
+    }
+    return saved;
+  }
+
+  getFeedbackExample(id: string): FeedbackExampleRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM feedback_examples WHERE id = ?").get(id) as
+      | FeedbackExampleRow
+      | undefined;
+    return row ? mapFeedbackExampleRow(row) : undefined;
+  }
+
+  listFeedbackExamples(options: {
+    decision?: ApprovalDecision;
+    limit?: number;
+  } = {}): FeedbackExampleRecord[] {
+    const limit = clampLimit(options.limit ?? 50, 1, 500);
+    const rows = options.decision
+      ? (this.db
+          .prepare(
+            `SELECT * FROM feedback_examples
+             WHERE decision = ?
+             ORDER BY created_at DESC
+             LIMIT ?`
+          )
+          .all(options.decision, limit) as unknown as FeedbackExampleRow[])
+      : (this.db
+          .prepare(
+            `SELECT * FROM feedback_examples
+             ORDER BY created_at DESC
+             LIMIT ?`
+          )
+          .all(limit) as unknown as FeedbackExampleRow[]);
+    return rows.map(mapFeedbackExampleRow);
+  }
+
+  feedbackStatsForSourceQuery(sourceQuery: string): { approved: number; rejected: number } {
+    const rows = this.db
+      .prepare(
+        `SELECT decision, COUNT(*) AS count
+         FROM feedback_examples
+         WHERE source_query = ?
+         GROUP BY decision`
+      )
+      .all(sourceQuery) as unknown as Array<{ decision: ApprovalDecision; count: number }>;
+    return countDecisions(rows);
+  }
+
+  feedbackStatsForAuthor(username: string): { approved: number; rejected: number } {
+    const rows = this.db
+      .prepare(
+        `SELECT decision, COUNT(*) AS count
+         FROM feedback_examples
+         WHERE author_username = ?
+         GROUP BY decision`
+      )
+      .all(normalizeUsername(username)) as unknown as Array<{ decision: ApprovalDecision; count: number }>;
+    return countDecisions(rows);
+  }
+
+  getFeedbackProfile(options: { exampleLimit?: number } = {}): FeedbackProfile {
+    const examples = this.listFeedbackExamples({ limit: options.exampleLimit ?? 100 });
+    const approved = examples.filter((example) => example.decision === "approved");
+    const rejected = examples.filter((example) => example.decision === "rejected");
+    const totalRows = this.db
+      .prepare("SELECT decision, COUNT(*) AS count FROM feedback_examples GROUP BY decision")
+      .all() as unknown as Array<{ decision: ApprovalDecision; count: number }>;
+    const totals = countDecisions(totalRows);
+    const labels: Record<string, number> = {};
+    for (const example of examples) {
+      for (const label of example.labels) {
+        labels[label] = (labels[label] ?? 0) + 1;
+      }
+    }
+
+    const queryRows = this.db
+      .prepare(
+        `SELECT source_query, decision, COUNT(*) AS count
+         FROM feedback_examples
+         WHERE source_query IS NOT NULL
+         GROUP BY source_query, decision`
+      )
+      .all() as unknown as Array<{ source_query: string; decision: ApprovalDecision; count: number }>;
+    const queryMap = new Map<string, { approved: number; rejected: number }>();
+    for (const row of queryRows) {
+      const stats = queryMap.get(row.source_query) ?? { approved: 0, rejected: 0 };
+      stats[row.decision] = row.count;
+      queryMap.set(row.source_query, stats);
+    }
+
+    return {
+      totals: {
+        approved: totals.approved,
+        rejected: totals.rejected
+      },
+      labels,
+      queryStats: [...queryMap.entries()]
+        .map(([sourceQuery, stats]) => ({
+          sourceQuery,
+          approved: stats.approved,
+          rejected: stats.rejected,
+          approvalRate: approvalRate(stats)
+        }))
+        .sort((a, b) => b.rejected + b.approved - (a.rejected + a.approved)),
+      examples: {
+        approved: approved.slice(0, 10),
+        rejected: rejected.slice(0, 10)
+      },
+      draftingGuidance: buildDraftingGuidance(approved, rejected, labels)
+    };
+  }
+
   recordPostedReply(input: {
     tweetId: string;
     authorId: string;
@@ -584,13 +954,41 @@ export class XHermesDatabase {
     return {
       candidatesByStatus,
       replyDrafts: this.countTable("reply_drafts"),
+      approvalRequests: this.countApprovalRequestsByStatus(),
+      feedbackExamples: this.countTable("feedback_examples"),
       postedReplies: this.countTable("posted_replies"),
       optOuts: this.countTable("opt_outs"),
       auditEvents: this.countTable("audit_events")
     };
   }
 
-  private countTable(table: "reply_drafts" | "posted_replies" | "opt_outs" | "audit_events"): number {
+  private requireApprovalRequest(id: string): ApprovalRequestRecord {
+    const saved = this.getApprovalRequest(id);
+    if (!saved) {
+      throw new Error(`Approval request not found: ${id}`);
+    }
+    return saved;
+  }
+
+  private countApprovalRequestsByStatus(): Record<ApprovalRequestStatus, number> {
+    const rows = this.db
+      .prepare("SELECT status, COUNT(*) AS count FROM approval_requests GROUP BY status")
+      .all() as unknown as Array<{ status: ApprovalRequestStatus; count: number }>;
+    const counts: Record<ApprovalRequestStatus, number> = {
+      pending: 0,
+      approved: 0,
+      rejected: 0,
+      expired: 0
+    };
+    for (const row of rows) {
+      counts[row.status] = row.count;
+    }
+    return counts;
+  }
+
+  private countTable(
+    table: "reply_drafts" | "approval_requests" | "feedback_examples" | "posted_replies" | "opt_outs" | "audit_events"
+  ): number {
     const row = this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number };
     return row.count;
   }
@@ -714,6 +1112,50 @@ CREATE INDEX scan_runs_started_at_idx ON scan_runs(started_at);
 CREATE INDEX reply_drafts_tweet_created_at_idx ON reply_drafts(tweet_id, created_at);
 `;
 
+const SCHEMA_V2_SQL = `
+CREATE TABLE approval_requests (
+  id TEXT PRIMARY KEY,
+  tweet_id TEXT NOT NULL REFERENCES candidates(tweet_id) ON DELETE CASCADE,
+  draft_id TEXT NOT NULL REFERENCES reply_drafts(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  requested_by TEXT NOT NULL,
+  channel TEXT,
+  recipient TEXT,
+  external_message_id TEXT,
+  delivery_status TEXT NOT NULL DEFAULT 'not_sent',
+  message_text TEXT,
+  expires_at TEXT,
+  decided_by TEXT,
+  decision_reason TEXT,
+  decision_labels_json TEXT NOT NULL DEFAULT '[]',
+  decided_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE feedback_examples (
+  id TEXT PRIMARY KEY,
+  approval_request_id TEXT REFERENCES approval_requests(id) ON DELETE SET NULL,
+  tweet_id TEXT NOT NULL REFERENCES candidates(tweet_id) ON DELETE CASCADE,
+  draft_id TEXT REFERENCES reply_drafts(id) ON DELETE SET NULL,
+  decision TEXT NOT NULL,
+  reason TEXT,
+  labels_json TEXT NOT NULL DEFAULT '[]',
+  candidate_text TEXT NOT NULL,
+  draft_text TEXT,
+  source_query TEXT,
+  author_username TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX approval_requests_status_created_at_idx ON approval_requests(status, created_at);
+CREATE INDEX approval_requests_tweet_status_idx ON approval_requests(tweet_id, status);
+CREATE INDEX approval_requests_draft_idx ON approval_requests(draft_id);
+CREATE INDEX feedback_examples_decision_created_at_idx ON feedback_examples(decision, created_at);
+CREATE INDEX feedback_examples_query_idx ON feedback_examples(source_query);
+CREATE INDEX feedback_examples_author_idx ON feedback_examples(author_username);
+`;
+
 function mapCandidateRow(row: CandidateRow): StoredCandidateRecord {
   return {
     tweetId: row.tweet_id,
@@ -773,6 +1215,45 @@ function mapReplyDraftRow(row: ReplyDraftRow): ReplyDraftRecord {
   };
 }
 
+function mapApprovalRequestRow(row: ApprovalRequestRow): ApprovalRequestRecord {
+  return {
+    id: row.id,
+    tweetId: row.tweet_id,
+    draftId: row.draft_id,
+    status: row.status,
+    requestedBy: row.requested_by,
+    channel: row.channel ?? undefined,
+    recipient: row.recipient ?? undefined,
+    externalMessageId: row.external_message_id ?? undefined,
+    deliveryStatus: row.delivery_status,
+    messageText: row.message_text ?? undefined,
+    expiresAt: row.expires_at ?? undefined,
+    decidedBy: row.decided_by ?? undefined,
+    decisionReason: row.decision_reason ?? undefined,
+    decisionLabels: parseJson(row.decision_labels_json, []),
+    decidedAt: row.decided_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapFeedbackExampleRow(row: FeedbackExampleRow): FeedbackExampleRecord {
+  return {
+    id: row.id,
+    approvalRequestId: row.approval_request_id ?? undefined,
+    tweetId: row.tweet_id,
+    draftId: row.draft_id ?? undefined,
+    decision: row.decision,
+    reason: row.reason ?? undefined,
+    labels: parseJson(row.labels_json, []),
+    candidateText: row.candidate_text,
+    draftText: row.draft_text ?? undefined,
+    sourceQuery: row.source_query ?? undefined,
+    authorUsername: row.author_username,
+    createdAt: row.created_at
+  };
+}
+
 function mapAuditEventRow(row: AuditEventRow): AuditEventRecord {
   return {
     id: row.id,
@@ -783,6 +1264,48 @@ function mapAuditEventRow(row: AuditEventRow): AuditEventRecord {
     details: parseJson(row.details_json, undefined),
     createdAt: row.created_at
   };
+}
+
+function countDecisions(rows: Array<{ decision: ApprovalDecision; count: number }>): {
+  approved: number;
+  rejected: number;
+} {
+  const counts = { approved: 0, rejected: 0 };
+  for (const row of rows) {
+    counts[row.decision] = row.count;
+  }
+  return counts;
+}
+
+function approvalRate(stats: { approved: number; rejected: number }): number {
+  const total = stats.approved + stats.rejected;
+  return total === 0 ? 0 : Math.round((stats.approved / total) * 1000) / 1000;
+}
+
+function buildDraftingGuidance(
+  approved: FeedbackExampleRecord[],
+  rejected: FeedbackExampleRecord[],
+  labels: Record<string, number>
+): string[] {
+  const guidance: string[] = [];
+  const commonRejected = Object.entries(labels)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([label]) => label);
+
+  if (approved.length > 0) {
+    guidance.push("Prefer the tone, specificity, and brevity of recent approved drafts.");
+  }
+  if (rejected.length > 0) {
+    guidance.push("Avoid patterns found in rejected drafts and candidate selections.");
+  }
+  if (commonRejected.length > 0) {
+    guidance.push(`Watch for frequent rejection labels: ${commonRejected.join(", ")}.`);
+  }
+  if (guidance.length === 0) {
+    guidance.push("No feedback examples yet. Keep drafts concise, specific, and non-hype.");
+  }
+  return guidance;
 }
 
 function stringifyJson(value: unknown): string {

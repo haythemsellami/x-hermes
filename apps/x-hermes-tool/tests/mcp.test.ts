@@ -34,9 +34,18 @@ describe("mcp", () => {
       "queue_reply_draft",
       "approve_candidate",
       "reject_candidate",
+      "list_approval_requests",
+      "get_approval_request",
+      "render_approval_request",
+      "record_approval_delivery",
+      "approve_request",
+      "reject_request",
+      "edit_draft",
+      "process_approval_response",
       "post_approved_reply",
       "record_opt_out",
-      "get_stats"
+      "get_stats",
+      "get_feedback_profile"
     ]);
   });
 
@@ -144,6 +153,11 @@ describe("mcp", () => {
     expect(listed.isError).toBe(false);
     const candidates = JSON.parse(listed.content[0].text) as Array<{ tweetId: string }>;
     expect(candidates.map((candidate) => candidate.tweetId)).toEqual(["tweet-1"]);
+
+    const approvals = await callTool("list_approval_requests", { status: "pending" });
+    expect(approvals.isError).toBe(false);
+    const requests = JSON.parse(approvals.content[0].text) as Array<{ tweetId: string }>;
+    expect(requests.map((request) => request.tweetId)).toEqual(["tweet-1"]);
   });
 });
 
