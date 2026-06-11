@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -29,7 +29,6 @@ describe("config", () => {
     expect(loaded.exists).toBe(false);
     expect(loaded.path).toBe(path.join(dir, "config.yaml"));
     expect(loaded.config.xurlApp).toBe("x-hermes");
-    expect(loaded.config.postingEnabled).toBe(false);
     expect(loaded.config.posting.enabled).toBe(false);
   });
 
@@ -51,38 +50,6 @@ describe("config", () => {
     const loaded = await loadConfig(env);
     expect(loaded.exists).toBe(true);
     expect(loaded.config.username).toBe("example_user");
-  });
-
-  it("loads legacy JSON config and maps flat aliases into nested config", async () => {
-    const dir = await tempDir();
-    const env = { X_HERMES_CONFIG_DIR: dir };
-    await writeFile(
-      path.join(dir, "config.json"),
-      JSON.stringify({
-        xurlApp: "x-hermes",
-        username: "legacy_user",
-        postingEnabled: true,
-        minimumFollowers: 1234,
-        perAuthorCooldownHours: 7,
-        activeHours: {
-          start: "00:00",
-          end: "23:59",
-          timezone: "UTC"
-        }
-      }),
-      "utf8"
-    );
-
-    const loaded = await loadConfig(env);
-
-    expect(loaded.exists).toBe(true);
-    expect(loaded.path).toBe(path.join(dir, "config.json"));
-    expect(loaded.config.username).toBe("legacy_user");
-    expect(loaded.config.posting.enabled).toBe(true);
-    expect(loaded.config.postingEnabled).toBe(true);
-    expect(loaded.config.quality.minimumFollowers).toBe(1234);
-    expect(loaded.config.posting.perAuthorCooldownHours).toBe(7);
-    expect(loaded.config.posting.activeHours.timezone).toBe("UTC");
   });
 
   it("rejects secret-like keys before writing config", () => {

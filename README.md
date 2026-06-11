@@ -192,8 +192,6 @@ campaigns:
     approvalMode: required
 ```
 
-Legacy `~/.config/x-hermes/config.json` files are still read and can be migrated with `x-hermes config init`.
-
 X OAuth tokens and app credentials are managed by `xurl` under `~/.xurl`. Do not commit, print, upload, parse, or inspect that directory.
 
 For development and tests, config/data paths can be overridden:

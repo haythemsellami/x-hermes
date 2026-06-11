@@ -81,20 +81,7 @@ export interface XHermesConfig {
   quality: QualityConfig;
   notifications: NotificationsConfig;
   campaigns: CampaignConfig[];
-  /**
-   * Compatibility aliases for older command paths. They are normalized from
-   * nested config values when loading YAML/JSON.
-   */
-  activeHours: ActiveHours;
-  maxRepliesPerDay: number;
   replyTextDefault: string;
-  postingEnabled: boolean;
-  minimumFollowers: number;
-  minimumAccountAgeDays: number;
-  perAuthorCooldownHours: number;
-  blockDuplicateReplyText: boolean;
-  requireApprovalForKeywordSearch: boolean;
-  requireOptInForAutoPost: boolean;
 }
 
 export interface LoadedConfig {
@@ -337,18 +324,5 @@ export const DEFAULT_CONFIG: XHermesConfig = {
     ]
   },
   campaigns: [],
-  activeHours: {
-    start: "09:00",
-    end: "21:00",
-    timezone: "America/New_York"
-  },
-  maxRepliesPerDay: 120,
-  replyTextDefault: "Configure this per project",
-  postingEnabled: false,
-  minimumFollowers: 1000,
-  minimumAccountAgeDays: 300,
-  perAuthorCooldownHours: 50,
-  blockDuplicateReplyText: true,
-  requireApprovalForKeywordSearch: true,
-  requireOptInForAutoPost: true
+  replyTextDefault: "Configure this per project"
 };

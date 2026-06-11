@@ -22,7 +22,6 @@ import {
 
 const SECRET_KEY_PATTERN = /(secret|token|password|private|credential|apiKey)/i;
 const YAML_CONFIG_FILE = "config.yaml";
-const LEGACY_JSON_CONFIG_FILE = "config.json";
 
 export function getConfigDir(env: NodeJS.ProcessEnv = process.env): string {
   if (env.X_HERMES_CONFIG_DIR) {
@@ -51,13 +50,9 @@ export function getConfigPath(env: NodeJS.ProcessEnv = process.env): string {
   return path.join(getConfigDir(env), YAML_CONFIG_FILE);
 }
 
-export function getLegacyConfigPath(env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(getConfigDir(env), LEGACY_JSON_CONFIG_FILE);
-}
-
 export function resolvedDefaultConfig(): XHermesConfig {
   const timezone =
-    Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_CONFIG.activeHours.timezone;
+    Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_CONFIG.posting.activeHours.timezone;
   return {
     ...DEFAULT_CONFIG,
     runtime: {
@@ -78,42 +73,33 @@ export function resolvedDefaultConfig(): XHermesConfig {
       channels: DEFAULT_CONFIG.notifications.channels.map((channel) => ({ ...channel }))
     },
     campaigns: [...DEFAULT_CONFIG.campaigns],
-    activeHours: {
-      ...DEFAULT_CONFIG.activeHours,
-      timezone
-    }
+    replyTextDefault: DEFAULT_CONFIG.replyTextDefault
   };
 }
 
 export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<LoadedConfig> {
-  const configPaths = [getConfigPath(env), getLegacyConfigPath(env)].filter(
-    (value, index, values) => values.indexOf(value) === index
-  );
+  const configPath = getConfigPath(env);
   const defaults = resolvedDefaultConfig();
 
-  for (const configPath of configPaths) {
-    try {
-      const raw = await readFile(configPath, "utf8");
-      const parsed = parseConfigFile(raw, configPath) as Partial<XHermesConfig>;
-      const config = normalizeConfig(defaults, parsed);
+  try {
+    const raw = await readFile(configPath, "utf8");
+    const parsed = parseConfigFile(raw, configPath) as Partial<XHermesConfig>;
+    const config = normalizeConfig(defaults, parsed);
+    return {
+      path: configPath,
+      exists: true,
+      config
+    };
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
       return {
         path: configPath,
-        exists: true,
-        config
+        exists: false,
+        config: defaults
       };
-    } catch (error) {
-      if (isNodeError(error) && error.code === "ENOENT") {
-        continue;
-      }
-      throw error;
     }
+    throw error;
   }
-
-  return {
-    path: getConfigPath(env),
-    exists: false,
-    config: defaults
-  };
 }
 
 export async function saveConfig(
@@ -258,7 +244,7 @@ export function assertNoSecretKeys(value: unknown, pathParts: string[] = []): vo
 }
 
 export function parseConfigFile(raw: string, configPath: string): Partial<XHermesConfig> {
-  const parsed = configPath.endsWith(".json") ? JSON.parse(raw) : YAML.parse(raw);
+  const parsed = YAML.parse(raw);
   if (parsed === null || parsed === undefined) {
     return {};
   }
@@ -337,8 +323,6 @@ export function normalizeConfig(
     channels: normalizeNotificationChannels(parsedNotifications.channels, defaults.notifications.channels)
   };
 
-  applyLegacyAliases(source, posting, quality, defaults);
-
   const config: XHermesConfig = {
     ...defaults,
     xurlApp: stringValue(source.xurlApp, defaults.xurlApp),
@@ -348,19 +332,7 @@ export function normalizeConfig(
     quality,
     notifications,
     campaigns: normalizeCampaigns(source.campaigns, defaults),
-    replyTextDefault: stringValue(source.replyTextDefault, defaults.replyTextDefault),
-    requireApprovalForKeywordSearch: booleanValue(
-      source.requireApprovalForKeywordSearch,
-      posting.approvalMode !== "none"
-    ),
-    activeHours: posting.activeHours,
-    maxRepliesPerDay: posting.maxRepliesPerDay,
-    postingEnabled: posting.enabled,
-    minimumFollowers: quality.minimumFollowers,
-    minimumAccountAgeDays: quality.minimumAccountAgeDays,
-    perAuthorCooldownHours: posting.perAuthorCooldownHours,
-    blockDuplicateReplyText: posting.blockDuplicateReplyText,
-    requireOptInForAutoPost: posting.requireOptInForAutoPost
+    replyTextDefault: stringValue(source.replyTextDefault, defaults.replyTextDefault)
   };
 
   return config;
@@ -377,123 +349,6 @@ export function configToFileShape(config: XHermesConfig): Record<string, unknown
     notifications: normalized.notifications,
     campaigns: normalized.campaigns
   };
-}
-
-function applyLegacyAliases(
-  source: Record<string, unknown>,
-  posting: PostingConfig,
-  quality: QualityConfig,
-  defaults: XHermesConfig
-): void {
-  if (shouldUseLegacyAlias(source, "posting", "enabled", "postingEnabled", defaults.posting.enabled)) {
-    posting.enabled = booleanValue(source.postingEnabled, posting.enabled);
-  }
-  if (
-    shouldUseLegacyAlias(
-      source,
-      "posting",
-      "maxRepliesPerDay",
-      "maxRepliesPerDay",
-      defaults.posting.maxRepliesPerDay
-    )
-  ) {
-    posting.maxRepliesPerDay = numberValue(source.maxRepliesPerDay, posting.maxRepliesPerDay);
-  }
-  if (
-    shouldUseLegacyAlias(
-      source,
-      "posting",
-      "activeHours",
-      "activeHours",
-      defaults.posting.activeHours
-    )
-  ) {
-    posting.activeHours = activeHoursValue(recordValue(source.activeHours), posting.activeHours);
-  }
-  if (
-    shouldUseLegacyAlias(
-      source,
-      "posting",
-      "perAuthorCooldownHours",
-      "perAuthorCooldownHours",
-      defaults.posting.perAuthorCooldownHours
-    )
-  ) {
-    posting.perAuthorCooldownHours = numberValue(
-      source.perAuthorCooldownHours,
-      posting.perAuthorCooldownHours
-    );
-  }
-  if (
-    shouldUseLegacyAlias(
-      source,
-      "posting",
-      "blockDuplicateReplyText",
-      "blockDuplicateReplyText",
-      defaults.posting.blockDuplicateReplyText
-    )
-  ) {
-    posting.blockDuplicateReplyText = booleanValue(
-      source.blockDuplicateReplyText,
-      posting.blockDuplicateReplyText
-    );
-  }
-  if (
-    shouldUseLegacyAlias(
-      source,
-      "posting",
-      "requireOptInForAutoPost",
-      "requireOptInForAutoPost",
-      defaults.posting.requireOptInForAutoPost
-    )
-  ) {
-    posting.requireOptInForAutoPost = booleanValue(
-      source.requireOptInForAutoPost,
-      posting.requireOptInForAutoPost
-    );
-  }
-  if (
-    shouldUseLegacyAlias(
-      source,
-      "quality",
-      "minimumFollowers",
-      "minimumFollowers",
-      defaults.quality.minimumFollowers
-    )
-  ) {
-    quality.minimumFollowers = numberValue(source.minimumFollowers, quality.minimumFollowers);
-  }
-  if (
-    shouldUseLegacyAlias(
-      source,
-      "quality",
-      "minimumAccountAgeDays",
-      "minimumAccountAgeDays",
-      defaults.quality.minimumAccountAgeDays
-    )
-  ) {
-    quality.minimumAccountAgeDays = numberValue(
-      source.minimumAccountAgeDays,
-      quality.minimumAccountAgeDays
-    );
-  }
-}
-
-function shouldUseLegacyAlias(
-  source: Record<string, unknown>,
-  blockName: "posting" | "quality",
-  nestedKey: string,
-  legacyKey: string,
-  defaultValue: unknown
-): boolean {
-  if (!(legacyKey in source)) {
-    return false;
-  }
-  const block = recordValue(source[blockName]);
-  if (!(nestedKey in block)) {
-    return true;
-  }
-  return deepEqual(block[nestedKey], defaultValue);
 }
 
 function normalizeCampaigns(value: unknown, defaults: XHermesConfig): CampaignConfig[] {
@@ -634,10 +489,6 @@ function isClock(value: string): boolean {
 
 function isNotificationEvent(value: unknown): value is NotificationEvent {
   return value === "post" || value === "error" || value === "approval_request";
-}
-
-function deepEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

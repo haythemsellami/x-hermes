@@ -147,7 +147,7 @@ Setup behavior:
    xurl whoami
    ```
 
-7. Store non-secret tool config in `~/.config/x-hermes/config.yaml`. Legacy `config.json` may be read for migration, but new writes should be YAML:
+7. Store non-secret tool config in `~/.config/x-hermes/config.yaml`:
 
    ```yaml
    xurlApp: x-hermes

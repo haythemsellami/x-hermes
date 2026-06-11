@@ -24,7 +24,10 @@ describe("posting", () => {
       {
         ...DEFAULT_CONFIG,
         username: "xhermes",
-        postingEnabled: false
+        posting: {
+          ...DEFAULT_CONFIG.posting,
+          enabled: false
+        }
       },
       fixture.env
     );
@@ -53,12 +56,15 @@ describe("posting", () => {
       {
         ...DEFAULT_CONFIG,
         username: "xhermes",
-        postingEnabled: true,
-        requireOptInForAutoPost: true,
-        activeHours: {
-          start: "00:00",
-          end: "23:59",
-          timezone: "UTC"
+        posting: {
+          ...DEFAULT_CONFIG.posting,
+          enabled: true,
+          requireOptInForAutoPost: true,
+          activeHours: {
+            start: "00:00",
+            end: "23:59",
+            timezone: "UTC"
+          }
         }
       },
       fixture.env

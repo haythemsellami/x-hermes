@@ -391,14 +391,7 @@ function campaignConfig(config: XHermesConfig, campaign: CampaignConfig): XHerme
   };
   return {
     ...config,
-    posting,
-    activeHours: posting.activeHours,
-    maxRepliesPerDay: posting.maxRepliesPerDay,
-    postingEnabled: posting.enabled,
-    perAuthorCooldownHours: posting.perAuthorCooldownHours,
-    blockDuplicateReplyText: posting.blockDuplicateReplyText,
-    requireOptInForAutoPost: posting.requireOptInForAutoPost,
-    requireApprovalForKeywordSearch: posting.approvalMode !== "none"
+    posting
   };
 }
 
