@@ -21,6 +21,15 @@ export interface ServiceInstallResult extends ServiceInfo {
 }
 
 const SERVICE_NAME = "x-hermes";
+const SERVICE_ENV_KEYS = [
+  "PATH",
+  "X_HERMES_CONFIG_DIR",
+  "X_HERMES_CONFIG_PATH",
+  "X_HERMES_DATA_DIR",
+  "X_HERMES_DB_PATH",
+  "X_HERMES_XURL_BIN",
+  "X_HERMES_HERMES_BIN"
+];
 
 export async function getServiceInfo(env: NodeJS.ProcessEnv = process.env): Promise<ServiceInfo> {
   const definition = serviceDefinition(env);
@@ -103,6 +112,7 @@ function serviceDefinition(env: NodeJS.ProcessEnv): {
   logCommand?: string;
 } {
   const execArgs = serviceExecArgs();
+  const environment = serviceEnvironment(env);
   if (process.platform === "linux") {
     const servicePath = path.join(configHome(env), "systemd", "user", `${SERVICE_NAME}.service`);
     return {
@@ -115,6 +125,7 @@ function serviceDefinition(env: NodeJS.ProcessEnv): {
         "",
         "[Service]",
         "Type=simple",
+        ...environment.map(([key, value]) => `Environment=${systemdEnvironment(key, value)}`),
         `ExecStart=${execArgs.map(systemdEscape).join(" ")}`,
         "Restart=always",
         "RestartSec=30",
@@ -136,7 +147,7 @@ function serviceDefinition(env: NodeJS.ProcessEnv): {
     return {
       manager: "launchd",
       path: plistPath,
-      contents: plist(execArgs),
+      contents: plist(execArgs, environment),
       installCommands: [`launchctl bootstrap gui/$(id -u) ${plistPath}`],
       logCommand: `log stream --predicate 'process == "x-hermes"'`
     };
@@ -166,8 +177,29 @@ function systemdEscape(value: string): string {
   return /[\s"'\\]/.test(value) ? `"${value.replace(/(["\\])/g, "\\$1")}"` : value;
 }
 
-function plist(args: string[]): string {
+function systemdEnvironment(key: string, value: string): string {
+  return `"${key}=${value.replace(/(["\\])/g, "\\$1")}"`;
+}
+
+function serviceEnvironment(env: NodeJS.ProcessEnv): Array<[string, string]> {
+  return SERVICE_ENV_KEYS.flatMap((key) => {
+    const value = env[key];
+    return value ? [[key, value] as [string, string]] : [];
+  });
+}
+
+function plist(args: string[], environment: Array<[string, string]>): string {
   const argsXml = args.map((arg) => `    <string>${escapeXml(arg)}</string>`).join("\n");
+  const environmentXml =
+    environment.length > 0
+      ? `  <key>EnvironmentVariables</key>
+  <dict>
+${environment
+  .map(([key, value]) => `    <key>${escapeXml(key)}</key>\n    <string>${escapeXml(value)}</string>`)
+  .join("\n")}
+  </dict>
+`
+      : "";
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -182,6 +214,7 @@ ${argsXml}
   <true/>
   <key>KeepAlive</key>
   <true/>
+${environmentXml}
 </dict>
 </plist>
 `;
