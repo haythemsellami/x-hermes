@@ -354,7 +354,9 @@ Default guardrails:
 ```text
 maxRepliesPerDay: 120
 activeWindow: 12h/day, configurable
-perAuthorCooldownHours: 168
+minimumFollowers: 1000
+minimumAccountAgeDays: 300
+perAuthorCooldownHours: 50
 requireApprovalForKeywordSearch: true
 requireOptInForAutoPost: true
 postingEnabled: false by default

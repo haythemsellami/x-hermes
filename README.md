@@ -156,7 +156,9 @@ Example:
   "maxRepliesPerDay": 120,
   "replyTextDefault": "Configure this per project",
   "postingEnabled": false,
-  "perAuthorCooldownHours": 168,
+  "minimumFollowers": 1000,
+  "minimumAccountAgeDays": 300,
+  "perAuthorCooldownHours": 50,
   "requireApprovalForKeywordSearch": true,
   "requireOptInForAutoPost": true
 }

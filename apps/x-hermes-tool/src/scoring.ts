@@ -7,8 +7,8 @@ export interface ScoringOptions {
   optedOut?: boolean;
 }
 
-const DEFAULT_MINIMUM_FOLLOWERS = 100;
-const DEFAULT_MINIMUM_ACCOUNT_AGE_DAYS = 30;
+const DEFAULT_MINIMUM_FOLLOWERS = 1000;
+const DEFAULT_MINIMUM_ACCOUNT_AGE_DAYS = 300;
 const SCAM_LANGUAGE =
   /\b(seed phrase|private key|airdrop|giveaway|free mint|wallet drain|claim now|guaranteed profit|double your|send eth|send sol)\b/i;
 
@@ -99,4 +99,3 @@ function accountAgeDays(createdAt: string, now: Date): number {
   }
   return (now.getTime() - created.getTime()) / 86_400_000;
 }
-

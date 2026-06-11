@@ -22,6 +22,8 @@ export interface XHermesConfig {
   maxRepliesPerDay: number;
   replyTextDefault: string;
   postingEnabled: boolean;
+  minimumFollowers: number;
+  minimumAccountAgeDays: number;
   perAuthorCooldownHours: number;
   requireApprovalForKeywordSearch: boolean;
   requireOptInForAutoPost: boolean;
@@ -236,7 +238,9 @@ export const DEFAULT_CONFIG: XHermesConfig = {
   maxRepliesPerDay: 120,
   replyTextDefault: "Configure this per project",
   postingEnabled: false,
-  perAuthorCooldownHours: 168,
+  minimumFollowers: 1000,
+  minimumAccountAgeDays: 300,
+  perAuthorCooldownHours: 50,
   requireApprovalForKeywordSearch: true,
   requireOptInForAutoPost: true
 };

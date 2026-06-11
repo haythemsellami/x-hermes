@@ -1,4 +1,5 @@
 import { openXHermesDatabase, type XHermesDatabase } from "./db.js";
+import { loadConfig } from "./config.js";
 import { feedbackSignalsForCandidate } from "./feedback.js";
 import { scoreCandidate } from "./scoring.js";
 import { buildRecentSearchPath } from "./xapi.js";
@@ -69,6 +70,7 @@ interface XApiUser {
 export async function scanRecentPosts(options: ScanOptions): Promise<ScanSummary> {
   const ownsDb = !options.db;
   const db = options.db ?? (await openXHermesDatabase({ env: options.env }));
+  const loaded = await loadConfig(options.env);
 
   try {
     const targets = resolveScanTargets(db, options);
@@ -111,7 +113,9 @@ export async function scanRecentPosts(options: ScanOptions): Promise<ScanSummary
 
         for (const item of parsed.candidates) {
           const scoring = scoreCandidate(item.candidate, item.author, {
-            optedOut: db.isOptedOut(item.author.username)
+            optedOut: db.isOptedOut(item.author.username),
+            minimumFollowers: loaded.config.minimumFollowers,
+            minimumAccountAgeDays: loaded.config.minimumAccountAgeDays
           });
           const feedback = feedbackSignalsForCandidate(db, item.candidate);
           item.candidate.score = scoring.score + feedback.scoreDelta;

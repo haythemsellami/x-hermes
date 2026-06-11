@@ -244,6 +244,10 @@ export function printStatusReport(title: string, report: StatusReport, io: Promp
       `active hours: ${report.config.activeHours.start}-${report.config.activeHours.end} ${report.config.activeHours.timezone}\n`
     );
     io.output.write(`posting enabled: ${String(report.config.postingEnabled)}\n`);
+    io.output.write(
+      `account quality: >=${report.config.minimumFollowers} followers, >=${report.config.minimumAccountAgeDays} days old\n`
+    );
+    io.output.write(`author cooldown: ${report.config.perAuthorCooldownHours}h\n`);
   }
 
   io.output.write("\n");
