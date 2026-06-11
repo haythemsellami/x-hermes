@@ -248,6 +248,7 @@ export function printStatusReport(title: string, report: StatusReport, io: Promp
       `account quality: >=${report.config.minimumFollowers} followers, >=${report.config.minimumAccountAgeDays} days old\n`
     );
     io.output.write(`author cooldown: ${report.config.perAuthorCooldownHours}h\n`);
+    io.output.write(`duplicate reply blocking: ${String(report.config.blockDuplicateReplyText)}\n`);
   }
 
   io.output.write("\n");

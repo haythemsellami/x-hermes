@@ -74,7 +74,7 @@ export function evaluatePostingGuardrails(input: PostingGuardrailInput): Guardra
     });
   }
 
-  if (input.draft) {
+  if (input.config.blockDuplicateReplyText && input.draft) {
     const duplicateSince = new Date(now.getTime() - 7 * 86_400_000).toISOString();
     const duplicateCount = input.db.countDuplicateReplyTextSince(input.draft.text, duplicateSince);
     if (duplicateCount > 0) {
@@ -154,4 +154,3 @@ function parseClockMinutes(value: string): number {
   }
   return hour * 60 + minute;
 }
-

@@ -159,6 +159,7 @@ Example:
   "minimumFollowers": 1000,
   "minimumAccountAgeDays": 300,
   "perAuthorCooldownHours": 50,
+  "blockDuplicateReplyText": true,
   "requireApprovalForKeywordSearch": true,
   "requireOptInForAutoPost": true
 }

@@ -25,6 +25,7 @@ export interface XHermesConfig {
   minimumFollowers: number;
   minimumAccountAgeDays: number;
   perAuthorCooldownHours: number;
+  blockDuplicateReplyText: boolean;
   requireApprovalForKeywordSearch: boolean;
   requireOptInForAutoPost: boolean;
 }
@@ -241,6 +242,7 @@ export const DEFAULT_CONFIG: XHermesConfig = {
   minimumFollowers: 1000,
   minimumAccountAgeDays: 300,
   perAuthorCooldownHours: 50,
+  blockDuplicateReplyText: true,
   requireApprovalForKeywordSearch: true,
   requireOptInForAutoPost: true
 };

@@ -58,6 +58,59 @@ describe("guardrails", () => {
       db.close();
     }
   });
+
+  it("can disable duplicate reply text blocking", async () => {
+    const db = await openCandidateDb();
+    try {
+      const candidate = db.getCandidate("tweet-1");
+      const draft = db.getLatestDraftForCandidate("tweet-1");
+      if (!candidate || !draft) {
+        throw new Error("missing candidate or draft");
+      }
+      db.recordPostedReply({
+        tweetId: "tweet-1",
+        authorId: "user-1",
+        draftId: draft.id,
+        replyTweetId: "reply-old",
+        replyText: draft.text
+      });
+
+      const blocked = evaluatePostingGuardrails({
+        config: {
+          ...DEFAULT_CONFIG,
+          username: "xhermes",
+          postingEnabled: true,
+          requireOptInForAutoPost: false,
+          activeHours: { start: "00:00", end: "23:59", timezone: "UTC" }
+        },
+        db,
+        candidate,
+        draft,
+        now: new Date("2026-06-10T15:00:00.000Z")
+      });
+      expect(blocked.failures.map((failure) => failure.id)).toContain("duplicate_reply_text");
+
+      const allowedDuplicateText = evaluatePostingGuardrails({
+        config: {
+          ...DEFAULT_CONFIG,
+          username: "xhermes",
+          postingEnabled: true,
+          blockDuplicateReplyText: false,
+          requireOptInForAutoPost: false,
+          activeHours: { start: "00:00", end: "23:59", timezone: "UTC" }
+        },
+        db,
+        candidate,
+        draft,
+        now: new Date("2026-06-10T15:00:00.000Z")
+      });
+      expect(allowedDuplicateText.failures.map((failure) => failure.id)).not.toContain(
+        "duplicate_reply_text"
+      );
+    } finally {
+      db.close();
+    }
+  });
 });
 
 async function openCandidateDb() {
@@ -88,4 +141,3 @@ async function tempDir(): Promise<string> {
   tempDirs.push(dir);
   return dir;
 }
-
