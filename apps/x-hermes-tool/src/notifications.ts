@@ -69,10 +69,62 @@ export async function notify(
           ? "command notification sent"
           : (result.stderr || result.stdout || "command notification failed").trim()
       });
+      continue;
+    }
+
+    if (channel.type === "hermes") {
+      if (!channel.target) {
+        results.push({ channelId: channel.id, ok: false, message: "target is required" });
+        continue;
+      }
+      const command = channel.command ?? options.env?.X_HERMES_HERMES_BIN ?? "hermes";
+      const args = [
+        ...(channel.args ?? []),
+        "send",
+        "--to",
+        channel.target,
+        "--file",
+        "-",
+        "--subject",
+        channel.subject ?? `[x-hermes] ${payload.title}`,
+        "--quiet"
+      ];
+      const result = await runProcess(command, args, {
+        env: options.env,
+        timeoutMs: 20_000,
+        stdin: formatHermesMessage(payload)
+      });
+      results.push({
+        channelId: channel.id,
+        ok: result.ok,
+        message: result.ok
+          ? "Hermes notification sent"
+          : (result.stderr || result.stdout || "Hermes notification failed").trim()
+      });
     }
   }
 
   return results;
+}
+
+function formatHermesMessage(payload: NotificationPayload): string {
+  const lines = [
+    payload.message,
+    "",
+    `event: ${payload.event}`,
+    `createdAt: ${payload.createdAt}`
+  ];
+
+  if (payload.data) {
+    for (const [key, value] of Object.entries(payload.data)) {
+      if (value === undefined || value === null) {
+        continue;
+      }
+      lines.push(`${key}: ${String(value)}`);
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
 }
 
 function isEventEnabled(config: XHermesConfig, event: NotificationEvent): boolean {

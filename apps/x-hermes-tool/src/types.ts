@@ -17,7 +17,7 @@ export interface ActiveHours {
 
 export type RuntimeMode = "once" | "daemon";
 export type ApprovalMode = "required" | "none" | "opt_in_auto_post";
-export type NotificationChannelType = "stdout" | "command";
+export type NotificationChannelType = "stdout" | "command" | "hermes";
 export type NotificationEvent = "post" | "error" | "approval_request";
 
 export interface RuntimeConfig {
@@ -51,6 +51,8 @@ export interface NotificationChannelConfig {
   enabled: boolean;
   command?: string;
   args?: string[];
+  target?: string;
+  subject?: string;
   events?: NotificationEvent[];
 }
 

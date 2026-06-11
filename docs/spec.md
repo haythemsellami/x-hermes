@@ -182,6 +182,11 @@ Setup behavior:
        - id: stdout
          type: stdout
          enabled: true
+       - id: hermes
+         type: hermes
+         enabled: false
+         target: telegram
+         events: [post, error, approval_request]
    campaigns: []
    ```
 
@@ -540,7 +545,7 @@ No direct generic shell command exposure to Hermes.
 - YAML-first config for campaigns, runtime, posting, quality, and notifications.
 - Managed `x-hermes run` daemon mode.
 - User service installation for Linux systemd and macOS launchd.
-- Messaging-gateway approval and notification adapters.
+- Hermes messaging-gateway notification adapter plus generic command notifications.
 - Optional dashboard later.
 
 ## Open Questions

@@ -143,6 +143,11 @@ notifications:
     - id: stdout
       type: stdout
       enabled: true
+    - id: hermes
+      type: hermes
+      enabled: false
+      target: telegram
+      events: [post, error, approval_request]
 campaigns:
   - id: example
     enabled: true
@@ -321,7 +326,28 @@ x-hermes config set posting.enabled true
 
 This is deliberately explicit because automated replies to cold keyword searches can have platform-policy and reputation risk.
 
-## 8. MCP
+## 8. Notifications Through Hermes Gateway
+
+`x-hermes` decides when a notification should be sent. Hermes owns delivery to Telegram, WhatsApp, Slack, Discord, and other configured gateways.
+
+Example:
+
+```yaml
+notifications:
+  onPost: true
+  onError: true
+  onApprovalRequest: true
+  channels:
+    - id: hermes
+      type: hermes
+      enabled: true
+      target: telegram
+      events: [post, error, approval_request]
+```
+
+The `target` value is passed to `hermes send --to`. Examples: `telegram`, `telegram:<chat_id>`, `discord:#ops`, `slack:#eng`, or `whatsapp:<recipient>`.
+
+## 9. MCP
 
 Run the MCP server:
 
@@ -370,7 +396,7 @@ get_feedback_profile
 
 MCP posting is hard-gated. `post_approved_reply` returns an error result when guardrails block posting.
 
-## 9. Development Checks
+## 10. Development Checks
 
 ```bash
 pnpm typecheck

@@ -182,6 +182,11 @@ notifications:
     - id: stdout
       type: stdout
       enabled: true
+    - id: hermes
+      type: hermes
+      enabled: false
+      target: telegram
+      events: [post, error, approval_request]
 campaigns:
   - id: example
     enabled: true
@@ -240,6 +245,20 @@ x-hermes stats
 x-hermes mcp
 x-hermes-mcp
 ```
+
+Hermes messaging gateways can be used for notifications without storing messaging secrets in `x-hermes`:
+
+```yaml
+notifications:
+  channels:
+    - id: hermes
+      type: hermes
+      enabled: true
+      target: telegram
+      events: [post, error, approval_request]
+```
+
+The `target` value uses Hermes `send --to` syntax, for example `telegram`, `telegram:<chat_id>`, `discord:#ops`, `slack:#eng`, or `whatsapp:<recipient>`.
 
 `doctor` never mutates state. `setup --check-only` runs setup checks without installs, auth changes, or config writes.
 

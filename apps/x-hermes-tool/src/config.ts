@@ -164,6 +164,26 @@ export function validateConfig(config: XHermesConfig): string[] {
     positiveInteger(errors, `campaign ${campaign.id}: postLimit`, campaign.postLimit, 1, 100);
   }
 
+  const channelIds = new Set<string>();
+  for (const channel of config.notifications.channels) {
+    if (!channel.id.trim()) {
+      errors.push("notifications.channels[].id is required.");
+    }
+    if (channelIds.has(channel.id)) {
+      errors.push(`notification channel id is duplicated: ${channel.id}`);
+    }
+    channelIds.add(channel.id);
+    if (!["stdout", "command", "hermes"].includes(channel.type)) {
+      errors.push(`notification channel ${channel.id}: type must be stdout, command, or hermes.`);
+    }
+    if (channel.enabled && channel.type === "command" && !channel.command?.trim()) {
+      errors.push(`notification channel ${channel.id}: command is required.`);
+    }
+    if (channel.enabled && channel.type === "hermes" && !channel.target?.trim()) {
+      errors.push(`notification channel ${channel.id}: target is required.`);
+    }
+  }
+
   return errors;
 }
 
@@ -392,7 +412,7 @@ function normalizeNotificationChannels(
     const source = recordValue(item);
     const channel: NotificationChannelConfig = {
       id: stringValue(source.id, ""),
-      type: source.type === "command" ? "command" : "stdout",
+      type: notificationChannelType(source.type),
       enabled: booleanValue(source.enabled, true)
     };
     if ("command" in source) {
@@ -400,6 +420,12 @@ function normalizeNotificationChannels(
     }
     if (Array.isArray(source.args)) {
       channel.args = source.args.map((arg) => String(arg));
+    }
+    if ("target" in source) {
+      channel.target = stringValue(source.target, "");
+    }
+    if ("subject" in source) {
+      channel.subject = stringValue(source.subject, "");
     }
     if (Array.isArray(source.events)) {
       channel.events = source.events.filter(isNotificationEvent);
@@ -489,6 +515,10 @@ function isClock(value: string): boolean {
 
 function isNotificationEvent(value: unknown): value is NotificationEvent {
   return value === "post" || value === "error" || value === "approval_request";
+}
+
+function notificationChannelType(value: unknown): NotificationChannelConfig["type"] {
+  return value === "command" || value === "hermes" ? value : "stdout";
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
